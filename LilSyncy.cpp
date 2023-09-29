@@ -4,38 +4,233 @@
 #include <iostream>
 #include <windows.h>
 #include <tchar.h>
+#include <queue>
 
-#include <strsafe.h>
+#include <mutex>
+#include <condition_variable>
 
 void PrintDirectory(std::wstring _path);
+
+using string = std::wstring;
+
+//////////////////////////////////////////////////
+// A threadsafe-queue.
+// Copied from: https://stackoverflow.com/a/16075550
+//////////////////////////////////////////////////
+template <class T>
+class SafeQueue
+{
+public:
+    SafeQueue(void)
+        : q()
+        , m()
+        , c()
+    {}
+
+    ~SafeQueue(void)
+    {}
+
+    // Add an element to the queue.
+    void enqueue(T t)
+    {
+        std::lock_guard<std::mutex> lock(m);
+        q.push(t);
+        c.notify_one();
+    }
+
+    // Get the "front"-element.
+    // If the queue is empty, wait till a element is avaiable.
+    T dequeue(void)
+    {
+        std::unique_lock<std::mutex> lock(m);
+        while (q.empty())
+        {
+            // release lock as long as the wait and reaquire it afterwards.
+            c.wait(lock);
+        }
+        T val = q.front();
+        q.pop();
+        return val;
+    }
+
+    bool empty()
+    {
+        std::lock_guard<std::mutex> lock(m);
+        return q.empty();
+        c.notify_one();
+    }
+
+private:
+    std::queue<T> q;
+    mutable std::mutex m;
+    std::condition_variable c;
+};
+//////////////////////////////////////////////////
+
+
+SafeQueue<string> ThreadsafePathQueue;
+std::atomic<long> ProcessedPaths = 0;
+void WalkPath(SafeQueue<string>& ProcessedPaths)
+{
+    _tprintf(TEXT("-> Started\n"));
+
+    WIN32_FIND_DATA FoundFileData;
+    HANDLE hFind;
+    string currentPath, currentFilename;
+    while (ThreadsafePathQueue.empty() == false)
+    {
+        currentPath = ThreadsafePathQueue.dequeue();
+
+        //_tprintf(TEXT("%s\n"), currentPath.c_str());
+
+        hFind = FindFirstFile((currentPath + L"*").c_str(), &FoundFileData);
+        do
+        {
+            ProcessedPaths++;
+
+            if (FoundFileData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+            {
+                currentFilename = FoundFileData.cFileName;
+
+                if (currentFilename == L"." || currentFilename == L"..")
+                {
+                    //_tprintf(TEXT("---- %s\n"), FoundFileData.cFileName);
+                }
+                else
+                {
+                    //_tprintf(TEXT("[ ] %s\n"), FoundFileData.cFileName);
+                    ThreadsafePathQueue.enqueue(currentPath + L"\\" + FoundFileData.cFileName + L"\\");
+                }
+            }
+            else
+            {
+                //_tprintf(TEXT("-> %s\n"), FoundFileData.cFileName);
+            }
+        } while (FindNextFile(hFind, &FoundFileData));
+
+        FindClose(hFind);
+    }
+}
 
 int main()
 {
     //const char* path = "C:\\*";
     //LPCWSTR path = L"C:\\*";
-    std::wstring path = TEXT("C:\\");
-    
-    WIN32_FIND_DATA FoundFileData;
-    HANDLE hFind;
+    std::wstring path = TEXT("C:\\");// TEXT("C:\\");
 
 
-    hFind = FindFirstFile((path + L"*").c_str(), &FoundFileData);
-    do
+    // Add the initial path
+    ThreadsafePathQueue.enqueue(path);
+
+    SafeQueue<string> paths;
+
+    constexpr int THREAD_COUNT = 10;
+    std::thread threads[THREAD_COUNT];
+    for (int i = 0; i < THREAD_COUNT; i++)
     {
-        if (FoundFileData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
-        {
-            _tprintf(TEXT("[ ] %s\n"), FoundFileData.cFileName);
-            PrintDirectory(path + L"\\" + FoundFileData.cFileName + L"\\*");
+        threads[i] = std::thread(WalkPath, paths);
+    }
 
-        }
-        else
-        {
-            _tprintf(TEXT("-> %s\n"), FoundFileData.cFileName);
-        }
-    } 
-    while (FindNextFile(hFind, &FoundFileData));
+    for (int i = 0; i < THREAD_COUNT; i++)
+    {
+        threads[i].join();
+    }
 
-    FindClose(hFind);
+
+    //std::thread first(WalkPath);
+    //Sleep(10);
+    //std::thread second(WalkPath);
+    //std::thread third(WalkPath);
+    //std::thread fourth(WalkPath);
+
+    //first.join();                // pauses until first finishes
+    //second.join();               // pauses until second finishes
+    //third.join();               // pauses until second finishes
+    //fourth.join();               // pauses until second finishes
+
+    std::cout << "completed. \n" << ProcessedPaths;
+
+    return 0;
+
+
+    //std::queue<string> pathQueue;
+    //
+    //// Add the initial path
+    //pathQueue.push(path);
+
+    //WIN32_FIND_DATA FoundFileData;
+    //HANDLE hFind;
+    //string currentPath, currentFilename;
+    //while (pathQueue.size() > 0)
+    //{
+    //    currentPath = pathQueue.front();
+
+    //    //_tprintf(TEXT("%s\n"), currentPath.c_str());
+
+    //    hFind = FindFirstFile((currentPath + L"*").c_str(), &FoundFileData);
+    //    do
+    //    {
+    //        ProcessedPaths++;
+    //        if (FoundFileData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+    //        {
+    //            currentFilename = FoundFileData.cFileName;
+
+    //            if (currentFilename == L"." || currentFilename == L"..")
+    //            {
+    //                //_tprintf(TEXT("---- %s\n"), FoundFileData.cFileName);
+    //            }
+    //            else
+    //            {
+    //                //_tprintf(TEXT("[ ] %s\n"), FoundFileData.cFileName);
+    //                pathQueue.push(currentPath + L"\\" + FoundFileData.cFileName + L"\\");
+    //            }
+    //        }
+    //        else
+    //        {
+    //            //_tprintf(TEXT("-> %s\n"), FoundFileData.cFileName);
+    //        }
+    //    } while (FindNextFile(hFind, &FoundFileData));
+
+    //    FindClose(hFind);
+
+    //    // Remove processed path from the queue
+    //    pathQueue.pop();
+    //}
+
+
+    //std::cout << "completed. \n" << ProcessedPaths;
+
+
+
+
+
+    //WIN32_FIND_DATA FoundFileData;
+    //HANDLE hFind;
+
+
+    //hFind = FindFirstFile((path + L"*").c_str(), &FoundFileData);
+    //do
+    //{
+    //    if (FoundFileData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+    //    {
+    //        _tprintf(TEXT("[ ] %s\n"), FoundFileData.cFileName);
+    //        PrintDirectory(path + L"\\" + FoundFileData.cFileName + L"\\*");
+
+    //    }
+    //    else
+    //    {
+    //        _tprintf(TEXT("-> %s\n"), FoundFileData.cFileName);
+    //    }
+    //}
+    //while (FindNextFile(hFind, &FoundFileData));
+
+    //FindClose(hFind);
+
+
+
+
+
+    //FindClose(hFind);
 
     //WIN32_FIND_DATA FindFileData;
     //HANDLE hFind;
@@ -54,6 +249,8 @@ int main()
     //    FindClose(hFind);
     //}
 }
+
+
 
 void PrintDirectory(std::wstring _path)
 {
