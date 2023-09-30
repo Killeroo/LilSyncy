@@ -126,52 +126,52 @@ void WalkPath(SafeQueue<string>& FoundPaths, std::atomic<long>& ProcessedPaths, 
     FinishedFlag = true;
 }
 
-namespace StaticTest
-{
-    SafeQueue<string> ThreadsafePathQueue;
-    std::atomic<long> ProcessedPaths = 0;
-    void WalkPath()
-    {
-        _tprintf(TEXT("-> Started\n"));
-
-        WIN32_FIND_DATA FoundFileData;
-        HANDLE hFind;
-        string currentPath, currentFilename;
-        while (ThreadsafePathQueue.empty() == false)
-        {
-            currentPath = ThreadsafePathQueue.dequeue();
-
-            //_tprintf(TEXT("%s\n"), currentPath.c_str());
-
-            hFind = FindFirstFile((currentPath + L"*").c_str(), &FoundFileData);
-            do
-            {
-                ProcessedPaths++;
-
-                if (FoundFileData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
-                {
-                    currentFilename = FoundFileData.cFileName;
-
-                    if (currentFilename == L"." || currentFilename == L"..")
-                    {
-                        //_tprintf(TEXT("---- %s\n"), FoundFileData.cFileName);
-                    }
-                    else
-                    {
-                        //_tprintf(TEXT("[ ] %s\n"), FoundFileData.cFileName);
-                        ThreadsafePathQueue.enqueue(currentPath + L"\\" + FoundFileData.cFileName + L"\\");
-                    }
-                }
-                else
-                {
-                    //_tprintf(TEXT("-> %s\n"), FoundFileData.cFileName);
-                }
-            } while (FindNextFile(hFind, &FoundFileData));
-
-            FindClose(hFind);
-        }
-    }
-}
+//namespace StaticTest
+//{
+//    SafeQueue<string> ThreadsafePathQueue;
+//    std::atomic<long> ProcessedPaths = 0;
+//    void WalkPath()
+//    {
+//        _tprintf(TEXT("-> Started\n"));
+//
+//        WIN32_FIND_DATA FoundFileData;
+//        HANDLE hFind;
+//        string currentPath, currentFilename;
+//        while (ThreadsafePathQueue.empty() == false)
+//        {
+//            currentPath = ThreadsafePathQueue.dequeue();
+//
+//            //_tprintf(TEXT("%s\n"), currentPath.c_str());
+//
+//            hFind = FindFirstFile((currentPath + L"*").c_str(), &FoundFileData);
+//            do
+//            {
+//                ProcessedPaths++;
+//
+//                if (FoundFileData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+//                {
+//                    currentFilename = FoundFileData.cFileName;
+//
+//                    if (currentFilename == L"." || currentFilename == L"..")
+//                    {
+//                        //_tprintf(TEXT("---- %s\n"), FoundFileData.cFileName);
+//                    }
+//                    else
+//                    {
+//                        //_tprintf(TEXT("[ ] %s\n"), FoundFileData.cFileName);
+//                        ThreadsafePathQueue.enqueue(currentPath + L"\\" + FoundFileData.cFileName + L"\\");
+//                    }
+//                }
+//                else
+//                {
+//                    //_tprintf(TEXT("-> %s\n"), FoundFileData.cFileName);
+//                }
+//            } while (FindNextFile(hFind, &FoundFileData));
+//
+//            FindClose(hFind);
+//        }
+//    }
+//}
 
 int main()
 {
@@ -185,7 +185,7 @@ int main()
 
     // Add the initial path
     paths.enqueue(path);
-    StaticTest::ThreadsafePathQueue.enqueue(path);
+    //StaticTest::ThreadsafePathQueue.enqueue(path);
 
     constexpr int THREAD_COUNT = 10;
     std::thread threads[THREAD_COUNT];
