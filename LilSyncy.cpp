@@ -55,9 +55,9 @@ public:
 
     bool empty()
     {
+        // Is this needed???????, I don't think we need this lock 
         std::lock_guard<std::mutex> lock(m);
         return q.empty();
-        c.notify_one();
     }
 
     std::queue<T> getQueue()
@@ -75,47 +75,58 @@ private:
 struct FileData
 {
     string Name;
-
+    string Path;
+    int64_t Size;
+    FILETIME LastWriteTime;
 };
 
 
 //SafeQueue<string> ThreadsafePathQueue;
-//std::atomic<long> ProcessedPaths = 0;
-void WalkPath(SafeQueue<string>& FoundPaths, std::atomic<long>& ProcessedPaths, std::atomic<bool>& FinishedFlag)
+//std::atomic<long> TotalProcessedPaths = 0;
+void WalkPath(std::vector<FileData>& FoundFiles, SafeQueue<string>& PathsToProcess, std::atomic<long>& TotalProcessedPaths, std::atomic<bool>& IsFinished)
 {
     //_tprintf(TEXT("-> Started\n"));
 
     WIN32_FIND_DATA FoundFileData;
     HANDLE hFind;
     string currentPath, currentFilename;
-    while (FoundPaths.empty() == false)
+    while (PathsToProcess.empty() == false)
     {
-        currentPath = FoundPaths.dequeue();
+        currentPath = PathsToProcess.dequeue();
 
         //_tprintf(TEXT("%s\n"), currentPath.c_str());
 
         hFind = FindFirstFile((currentPath + L"*").c_str(), &FoundFileData);
         do
         {
-            ProcessedPaths++;
+            TotalProcessedPaths++;
 
             if (FoundFileData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
             {
                 currentFilename = FoundFileData.cFileName;
-
-                if (currentFilename == L"." || currentFilename == L"..")
+                
+                if (currentFilename != L"." && currentFilename != L"..")
                 {
                     //_tprintf(TEXT("---- %s\n"), FoundFileData.cFileName);
+
+                    PathsToProcess.enqueue(currentPath + L"\\" + FoundFileData.cFileName + L"\\");
                 }
-                else
-                {
-                    //_tprintf(TEXT("[ ] %s\n"), FoundFileData.cFileName);
-                    FoundPaths.enqueue(currentPath + L"\\" + FoundFileData.cFileName + L"\\");
-                }
+                //else
+                //{
+                //    //_tprintf(TEXT("[ ] %s\n"), FoundFileData.cFileName);
+                //}
             }
-            else
+            else// if (FoundFileData.dwFileAttributes & FILE_ATTRIBUTE_NORMAL)
             {
+                FileData data;
+                data.Name = FoundFileData.cFileName;
+                data.Path = currentPath;
+                data.LastWriteTime = FoundFileData.ftLastWriteTime;
+                data.Size = (FoundFileData.nFileSizeHigh * MAXDWORD) + FoundFileData.nFileSizeLow;
+                FoundFiles.push_back(data);
+
                 //_tprintf(TEXT("-> %s\n"), FoundFileData.cFileName);
+                //_tprintf(TEXT("-> %s\n"), currentPath.c_str());
             }
         } while (FindNextFile(hFind, &FoundFileData));
 
@@ -123,13 +134,13 @@ void WalkPath(SafeQueue<string>& FoundPaths, std::atomic<long>& ProcessedPaths, 
     }
 
     // Signal that we are done
-    FinishedFlag = true;
+    IsFinished = true;
 }
 
 //namespace StaticTest
 //{
 //    SafeQueue<string> ThreadsafePathQueue;
-//    std::atomic<long> ProcessedPaths = 0;
+//    std::atomic<long> TotalProcessedPaths = 0;
 //    void WalkPath()
 //    {
 //        _tprintf(TEXT("-> Started\n"));
@@ -146,7 +157,7 @@ void WalkPath(SafeQueue<string>& FoundPaths, std::atomic<long>& ProcessedPaths, 
 //            hFind = FindFirstFile((currentPath + L"*").c_str(), &FoundFileData);
 //            do
 //            {
-//                ProcessedPaths++;
+//                TotalProcessedPaths++;
 //
 //                if (FoundFileData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
 //                {
@@ -173,11 +184,24 @@ void WalkPath(SafeQueue<string>& FoundPaths, std::atomic<long>& ProcessedPaths, 
 //    }
 //}
 
+class FileWalker
+{
+public:
+    std::vector<FileData> GetFiles(string path)
+    {
+
+    }
+
+private:
+
+
+};
+
 int main()
 {
     //const char* path = "C:\\*";
     //LPCWSTR path = L"C:\\*";
-    std::wstring path = TEXT("C:\\");// TEXT("C:\\");
+    std::wstring path = TEXT("C:\\Projects\\");// TEXT("C:\\");
 
 
     SafeQueue<string> paths;
@@ -188,12 +212,16 @@ int main()
     //StaticTest::ThreadsafePathQueue.enqueue(path);
 
     constexpr int THREAD_COUNT = 10;
+    std::vector<FileData> results[THREAD_COUNT];
     std::thread threads[THREAD_COUNT];
     std::atomic<bool> completionFlags[THREAD_COUNT];
+    //std::vector<std::thread> threads;
     for (int i = 0; i < THREAD_COUNT; i++)
     {
         completionFlags[i] = false;
-        threads[i] = std::thread(WalkPath, std::ref(paths), std::ref(pathCount), std::ref(completionFlags[i]));
+        threads[i] = std::thread(WalkPath, std::ref(results[i]), std::ref(paths), std::ref(pathCount), std::ref(completionFlags[i]));
+        //threads.push_back(std::thread(WalkPath, std::ref(paths), std::ref(pathCount), std::ref(completionFlags[i])));
+
         Sleep(10);
 
         //threads[i] = std::thread(StaticTest::WalkPath);
@@ -201,6 +229,7 @@ int main()
 
     char loadingCharacter[4] = { '|', '/', '-', '\\' };
 
+    // Wait for the threads to finish
     bool finished = false;
     int16_t current = 0;
     while (!finished)
@@ -223,10 +252,24 @@ int main()
         Sleep(50);
     }
 
-    //for (int i = 0; i < THREAD_COUNT; i++)
-    //{
-    //    threads[i].join();
-    //}
+    // Wait for them all the join so they can be disposed properly 
+    for (int i = 0; i < THREAD_COUNT; i++)
+    {
+        threads[i].join();
+    }
+
+    for (int c = 0; c < THREAD_COUNT; c++)
+    {
+        std::vector<FileData> current = results[c];
+        for (int i = 0; i < current.size(); i++)
+        {
+            //results->data();
+            //printf("%s\n", current[i].c_str());
+
+            _tprintf(TEXT("-> %s \n"), current[i].Name.c_str());
+        }
+    }
+
 
 
     //std::thread first(WalkPath);
@@ -262,7 +305,7 @@ int main()
     //    hFind = FindFirstFile((currentPath + L"*").c_str(), &FoundFileData);
     //    do
     //    {
-    //        ProcessedPaths++;
+    //        TotalProcessedPaths++;
     //        if (FoundFileData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
     //        {
     //            currentFilename = FoundFileData.cFileName;
@@ -290,7 +333,7 @@ int main()
     //}
 
 
-    //std::cout << "completed. \n" << ProcessedPaths;
+    //std::cout << "completed. \n" << TotalProcessedPaths;
 
 
 
