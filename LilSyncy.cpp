@@ -6,135 +6,231 @@
 #include <tchar.h>
 #include <queue>
 
+#include "FileWalker.h"
+
+#include <map>
 #include <mutex>
 #include <condition_variable>
 
 void PrintDirectory(std::wstring _path);
 
-using string = std::wstring;
 
-//////////////////////////////////////////////////
-// A threadsafe-queue.
-// Copied from: https://stackoverflow.com/a/16075550
-//////////////////////////////////////////////////
-template <class T>
-class SafeQueue
+namespace OldParsingCode
 {
-public:
-    SafeQueue(void)
-        : q()
-        , m()
-        , c()
-    {}
+    using string = std::wstring;
 
-    ~SafeQueue(void)
-    {}
-
-    // Add an element to the queue.
-    void enqueue(T t)
+    //////////////////////////////////////////////////
+    // A threadsafe-queue.
+    // Copied from: https://stackoverflow.com/a/16075550
+    //////////////////////////////////////////////////
+    template <class T>
+    class SafeQueue
     {
-        std::lock_guard<std::mutex> lock(m);
-        q.push(t);
-        c.notify_one();
-    }
+    public:
+        SafeQueue(void)
+            : q()
+            , m()
+            , c()
+        {}
 
-    // Get the "front"-element.
-    // If the queue is empty, wait till a element is avaiable.
-    T dequeue(void)
-    {
-        std::unique_lock<std::mutex> lock(m);
-        while (q.empty())
+        ~SafeQueue(void)
+        {}
+
+        // Add an element to the queue.
+        void enqueue(T t)
         {
-            // release lock as long as the wait and reaquire it afterwards.
-            c.wait(lock);
+            std::lock_guard<std::mutex> lock(m);
+            q.push(t);
+            c.notify_one();
         }
-        T val = q.front();
-        q.pop();
-        return val;
-    }
 
-    bool empty()
-    {
-        // Is this needed???????, I don't think we need this lock 
-        std::lock_guard<std::mutex> lock(m);
-        return q.empty();
-    }
-
-    std::queue<T> getQueue()
-    {
-        return q;
-    }
-
-private:
-    std::queue<T> q;
-    mutable std::mutex m;
-    std::condition_variable c;
-};
-//////////////////////////////////////////////////
-
-struct FileData
-{
-    string Name;
-    string Path;
-    int64_t Size;
-    FILETIME LastWriteTime;
-};
-
-
-//SafeQueue<string> ThreadsafePathQueue;
-//std::atomic<long> TotalProcessedPaths = 0;
-void WalkPath(std::vector<FileData>& FoundFiles, SafeQueue<string>& PathsToProcess, std::atomic<long>& TotalProcessedPaths, std::atomic<bool>& IsFinished)
-{
-    //_tprintf(TEXT("-> Started\n"));
-
-    WIN32_FIND_DATA FoundFileData;
-    HANDLE hFind;
-    string currentPath, currentFilename;
-    while (PathsToProcess.empty() == false)
-    {
-        currentPath = PathsToProcess.dequeue();
-
-        //_tprintf(TEXT("%s\n"), currentPath.c_str());
-
-        hFind = FindFirstFile((currentPath + L"*").c_str(), &FoundFileData);
-        do
+        // Get the "front"-element.
+        // If the queue is empty, wait till a element is avaiable.
+        T dequeue(void)
         {
-            TotalProcessedPaths++;
-
-            if (FoundFileData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+            std::unique_lock<std::mutex> lock(m);
+            while (q.empty())
             {
-                currentFilename = FoundFileData.cFileName;
-                
-                if (currentFilename != L"." && currentFilename != L"..")
+                // release lock as long as the wait and reaquire it afterwards.
+                c.wait(lock);
+            }
+            T val = q.front();
+            q.pop();
+            return val;
+        }
+
+        bool empty()
+        {
+            // Is this needed???????, I don't think we need this lock 
+            std::lock_guard<std::mutex> lock(m);
+            return q.empty();
+        }
+
+        std::queue<T> getQueue()
+        {
+            return q;
+        }
+
+    private:
+        std::queue<T> q;
+        mutable std::mutex m;
+        std::condition_variable c;
+    };
+    //////////////////////////////////////////////////
+
+    struct FileData
+    {
+        string Name;
+        string Path;
+        int64_t Size;
+        FILETIME LastWriteTime;
+    };
+
+
+    //SafeQueue<string> ThreadsafePathQueue;
+    //std::atomic<long> TotalProcessedPaths = 0;
+    void WalkPath(std::vector<FileData>& FoundFiles, SafeQueue<string>& PathsToProcess, std::atomic<long>& TotalProcessedPaths, std::atomic<bool>& IsFinished)
+    {
+        //_tprintf(TEXT("-> Started\n"));
+
+        WIN32_FIND_DATA FoundFileData;
+        HANDLE hFind;
+        string currentPath, currentFilename;
+        while (PathsToProcess.empty() == false)
+        {
+            currentPath = PathsToProcess.dequeue();
+
+            //_tprintf(TEXT("%s\n"), currentPath.c_str());
+
+            hFind = FindFirstFile((currentPath + L"*").c_str(), &FoundFileData);
+            do
+            {
+                TotalProcessedPaths++;
+
+                if (FoundFileData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
                 {
-                    //_tprintf(TEXT("---- %s\n"), FoundFileData.cFileName);
+                    currentFilename = FoundFileData.cFileName;
+                
+                    if (currentFilename != L"." && currentFilename != L"..")
+                    {
+                        //_tprintf(TEXT("---- %s\n"), FoundFileData.cFileName);
 
-                    PathsToProcess.enqueue(currentPath + L"\\" + FoundFileData.cFileName + L"\\");
+                        PathsToProcess.enqueue(currentPath + L"\\" + FoundFileData.cFileName + L"\\");
+                    }
+                    //else
+                    //{
+                    //    //_tprintf(TEXT("[ ] %s\n"), FoundFileData.cFileName);
+                    //}
                 }
-                //else
-                //{
-                //    //_tprintf(TEXT("[ ] %s\n"), FoundFileData.cFileName);
-                //}
-            }
-            else// if (FoundFileData.dwFileAttributes & FILE_ATTRIBUTE_NORMAL)
-            {
-                FileData data;
-                data.Name = FoundFileData.cFileName;
-                data.Path = currentPath;
-                data.LastWriteTime = FoundFileData.ftLastWriteTime;
-                data.Size = (FoundFileData.nFileSizeHigh * MAXDWORD) + FoundFileData.nFileSizeLow;
-                FoundFiles.push_back(data);
+                else// if (FoundFileData.dwFileAttributes & FILE_ATTRIBUTE_NORMAL)
+                {
+                    FileData data;
+                    data.Name = FoundFileData.cFileName;
+                    data.Path = currentPath;
+                    data.LastWriteTime = FoundFileData.ftLastWriteTime;
+                    data.Size = (FoundFileData.nFileSizeHigh * MAXDWORD) + FoundFileData.nFileSizeLow;
+                    FoundFiles.push_back(data);
 
-                //_tprintf(TEXT("-> %s\n"), FoundFileData.cFileName);
-                //_tprintf(TEXT("-> %s\n"), currentPath.c_str());
-            }
-        } while (FindNextFile(hFind, &FoundFileData));
+                    //_tprintf(TEXT("-> %s\n"), FoundFileData.cFileName);
+                    //_tprintf(TEXT("-> %s\n"), currentPath.c_str());
+                }
+            } while (FindNextFile(hFind, &FoundFileData));
 
-        FindClose(hFind);
+            FindClose(hFind);
+        }
+
+        // Signal that we are done
+        IsFinished = true;
     }
 
-    // Signal that we are done
-    IsFinished = true;
+    int Run()
+    {
+
+        std::wstring path = TEXT("C:\\Projects\\");// TEXT("C:\\");
+
+        SafeQueue<string> paths;
+        std::atomic<long> pathCount;
+
+        // Add the initial path
+        paths.enqueue(path);
+        //StaticTest::ThreadsafePathQueue.enqueue(path);
+
+        constexpr int THREAD_COUNT = 10;
+        std::vector<FileData> results[THREAD_COUNT];
+        std::thread threads[THREAD_COUNT];
+        std::atomic<bool> completionFlags[THREAD_COUNT];
+        //std::vector<std::thread> threads;
+        for (int i = 0; i < THREAD_COUNT; i++)
+        {
+            completionFlags[i] = false;
+            threads[i] = std::thread(WalkPath, std::ref(results[i]), std::ref(paths), std::ref(pathCount), std::ref(completionFlags[i]));
+            //threads.push_back(std::thread(WalkPath, std::ref(paths), std::ref(pathCount), std::ref(completionFlags[i])));
+
+            Sleep(10);
+
+            //threads[i] = std::thread(StaticTest::WalkPath);
+        }
+
+        char loadingCharacter[4] = { '|', '/', '-', '\\' };
+
+        // Wait for the threads to finish
+        bool finished = false;
+        int16_t current = 0;
+        while (!finished)
+        {
+            // Check if the threads have finished running
+            finished = true;
+            for (int i = 0; i < THREAD_COUNT; i++)
+            {
+                finished &= completionFlags[i];
+            }
+
+            current++;
+            if (current == 4)
+            {
+                current = 0;
+            }
+
+            printf("Finding files %c \r", loadingCharacter[current]);
+
+            Sleep(50);
+        }
+
+        // Wait for them all the join so they can be disposed properly 
+        for (int i = 0; i < THREAD_COUNT; i++)
+        {
+            threads[i].join();
+        }
+
+        for (int c = 0; c < THREAD_COUNT; c++)
+        {
+            std::vector<FileData> current = results[c];
+            for (int i = 0; i < current.size(); i++)
+            {
+                //results->data();
+                //printf("%s\n", current[i].c_str());
+
+                _tprintf(TEXT("-> %s \n"), current[i].Name.c_str());
+            }
+        }
+
+
+
+        //std::thread first(WalkPath);
+        //Sleep(10);
+        //std::thread second(WalkPath);
+        //std::thread third(WalkPath);
+        //std::thread fourth(WalkPath);
+
+        //first.join();                // pauses until first finishes
+        //second.join();               // pauses until second finishes
+        //third.join();               // pauses until second finishes
+        //fourth.join();               // pauses until second finishes
+
+        std::cout << "completed. \n" << pathCount;
+
+        return 0;
+    }
 }
 
 //namespace StaticTest
@@ -184,108 +280,60 @@ void WalkPath(std::vector<FileData>& FoundFiles, SafeQueue<string>& PathsToProce
 //    }
 //}
 
-class FileWalker
+struct Options
 {
-public:
-    std::vector<FileData> GetFiles(string path)
-    {
-
-    }
-
-private:
-
-
+    std::wstring SourcePath;
+    std::wstring DestinationPath;
 };
 
-int main()
+Options ParseArguments(int argc, char* argv[])
 {
+    // Could just parse by reference
+    Options parsedOptions;
+
+    for (int i = 0; i < argc; i++)
+    {
+        std::cout << argv[i] << std::endl;
+        std::wstring argument = argv[i];
+
+        if (argument == L"--source")
+        {
+            if ()
+        }
+        else if (argument == L"--source")
+        {
+
+        }
+
+        switch (argument)
+        {
+            case ""
+        }
+    }
+
+    return parsedOptions;
+}
+
+void Error(std::wstring message)
+{
+    
+}
+
+int main(int argc, char* argv[])
+{
+    ParseArguments(argc, argv);
+
     //const char* path = "C:\\*";
     //LPCWSTR path = L"C:\\*";
     std::wstring path = TEXT("C:\\Projects\\");// TEXT("C:\\");
 
 
-    SafeQueue<string> paths;
-    std::atomic<long> pathCount;
-
-    // Add the initial path
-    paths.enqueue(path);
-    //StaticTest::ThreadsafePathQueue.enqueue(path);
-
-    constexpr int THREAD_COUNT = 10;
-    std::vector<FileData> results[THREAD_COUNT];
-    std::thread threads[THREAD_COUNT];
-    std::atomic<bool> completionFlags[THREAD_COUNT];
-    //std::vector<std::thread> threads;
-    for (int i = 0; i < THREAD_COUNT; i++)
-    {
-        completionFlags[i] = false;
-        threads[i] = std::thread(WalkPath, std::ref(results[i]), std::ref(paths), std::ref(pathCount), std::ref(completionFlags[i]));
-        //threads.push_back(std::thread(WalkPath, std::ref(paths), std::ref(pathCount), std::ref(completionFlags[i])));
-
-        Sleep(10);
-
-        //threads[i] = std::thread(StaticTest::WalkPath);
-    }
-
-    char loadingCharacter[4] = { '|', '/', '-', '\\' };
-
-    // Wait for the threads to finish
-    bool finished = false;
-    int16_t current = 0;
-    while (!finished)
-    {
-        // Check if the threads have finished running
-        finished = true;
-        for (int i = 0; i < THREAD_COUNT; i++)
-        {
-            finished &= completionFlags[i];
-        }
-
-        current++;
-        if (current == 4)
-        {
-            current = 0;
-        }
-
-        printf("Finding files %c \r", loadingCharacter[current]);
-
-        Sleep(50);
-    }
-
-    // Wait for them all the join so they can be disposed properly 
-    for (int i = 0; i < THREAD_COUNT; i++)
-    {
-        threads[i].join();
-    }
-
-    for (int c = 0; c < THREAD_COUNT; c++)
-    {
-        std::vector<FileData> current = results[c];
-        for (int i = 0; i < current.size(); i++)
-        {
-            //results->data();
-            //printf("%s\n", current[i].c_str());
-
-            _tprintf(TEXT("-> %s \n"), current[i].Name.c_str());
-        }
-    }
-
-
-
-    //std::thread first(WalkPath);
-    //Sleep(10);
-    //std::thread second(WalkPath);
-    //std::thread third(WalkPath);
-    //std::thread fourth(WalkPath);
-
-    //first.join();                // pauses until first finishes
-    //second.join();               // pauses until second finishes
-    //third.join();               // pauses until second finishes
-    //fourth.join();               // pauses until second finishes
-
-    std::cout << "completed. \n" << pathCount;
-
+    FileWalker walker;
+    std::map<std::wstring, FileData> sourceFiles = walker.GetFiles(path);
+    std::map<std::wstring, FileData> destinationFiles = walker.GetFiles(path);
     return 0;
+
+
 
 
     //std::queue<string> pathQueue;
