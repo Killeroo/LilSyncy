@@ -64,7 +64,7 @@ std::map<std::wstring, FileData> FileWalker::GetFiles(std::wstring path)
     {
         FileData currentFile = FoundFiles.dequeue();
 
-        std::wstring relativePath = currentFile.Path;
+        std::wstring relativePath = currentFile.Path + L"\\" + currentFile.Name;
         relativePath.erase(0, rootPathSize);
 
         Results.insert({relativePath, currentFile});

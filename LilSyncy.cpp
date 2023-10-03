@@ -5,12 +5,16 @@
 #include <windows.h>
 #include <tchar.h>
 #include <queue>
+#include <locale>
+#include <codecvt>
+#include <string>
 
 #include "FileWalker.h"
 
 #include <map>
 #include <mutex>
 #include <condition_variable>
+
 
 void PrintDirectory(std::wstring _path);
 
@@ -286,33 +290,56 @@ struct Options
     std::wstring DestinationPath;
 };
 
-Options ParseArguments(int argc, char* argv[])
+bool IsValidFolder(const std::wstring& path)
 {
-    // Could just parse by reference
-    Options parsedOptions;
+    DWORD fileType = GetFileAttributes(path.c_str());
 
+    if (fileType == INVALID_FILE_ATTRIBUTES)
+    {
+        return false;
+    }
+
+    return fileType & FILE_ATTRIBUTE_DIRECTORY;
+}
+
+// https://stackoverflow.com/a/18597384
+std::wstring ToWideString(char*& string)
+{
+    std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
+    return converter.from_bytes(string);
+}
+
+void ParseArguments(int argc, char* argv[], Options& outOptions)
+{
     for (int i = 0; i < argc; i++)
     {
         std::cout << argv[i] << std::endl;
-        std::wstring argument = argv[i];
+        const std::wstring argument = ToWideString(argv[i]);
+        const std::wstring nextArgument = i + 1 < argc ? ToWideString(argv[i + 1]) : L"";
 
         if (argument == L"--source")
         {
-            if ()
+            if (nextArgument != L"")
+            {
+                if (IsValidFolder(nextArgument))
+                {
+                    outOptions.SourcePath = nextArgument;
+                }
+            }
         }
-        else if (argument == L"--source")
+        else if (argument == L"--destination")
         {
-
-        }
-
-        switch (argument)
-        {
-            case ""
+            if (nextArgument != L"")
+            {
+                if (IsValidFolder(nextArgument))
+                {
+                    outOptions.DestinationPath = nextArgument;
+                }
+            }
         }
     }
-
-    return parsedOptions;
 }
+
 
 void Error(std::wstring message)
 {
@@ -321,7 +348,15 @@ void Error(std::wstring message)
 
 int main(int argc, char* argv[])
 {
-    ParseArguments(argc, argv);
+    Options parsedOptions;
+    ParseArguments(argc, argv, parsedOptions);
+
+    if (parsedOptions.DestinationPath == L"" && parsedOptions.SourcePath == L"")
+        //|| parsedOptions.DestinationPath == parsedOptions.SourcePath)
+    {
+        // TODO: Error message
+        return 1;
+    }
 
     //const char* path = "C:\\*";
     //LPCWSTR path = L"C:\\*";
@@ -329,8 +364,8 @@ int main(int argc, char* argv[])
 
 
     FileWalker walker;
-    std::map<std::wstring, FileData> sourceFiles = walker.GetFiles(path);
-    std::map<std::wstring, FileData> destinationFiles = walker.GetFiles(path);
+    std::map<std::wstring, FileData> sourceFiles = walker.GetFiles(parsedOptions.SourcePath);
+    std::map<std::wstring, FileData> destinationFiles = walker.GetFiles(parsedOptions.DestinationPath);
     return 0;
 
 
