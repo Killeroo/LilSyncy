@@ -60,11 +60,12 @@ std::map<std::wstring, FileData> FileWalker::GetFiles(std::wstring path)
     // Prepare results
     std::map<std::wstring, FileData> Results;
     const size_t rootPathSize = RootPath.size();
+    FileData currentFile;
     while (FoundFiles.empty() == false)
     {
-        FileData currentFile = FoundFiles.dequeue();
+        currentFile = FoundFiles.dequeue();
 
-        std::wstring relativePath = currentFile.Path + L"\\" + currentFile.Name;
+        std::wstring relativePath = currentFile.Path + currentFile.Name;
         relativePath.erase(0, rootPathSize);
 
         Results.insert({relativePath, currentFile});
@@ -93,7 +94,7 @@ void FileWalker::WorkerThread(std::atomic<bool>& IsFinished)
 
                 if (currentFilename != L"." && currentFilename != L"..")
                 {
-                    PathsToProcess.enqueue(currentPath + L"\\" + FoundFileData.cFileName + L"\\");
+                    PathsToProcess.enqueue(currentPath + FoundFileData.cFileName + L"\\");
                 }
             }
             else// if (FoundFileData.dwFileAttributes & FILE_ATTRIBUTE_NORMAL)
