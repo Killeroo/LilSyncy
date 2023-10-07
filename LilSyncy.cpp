@@ -14,6 +14,7 @@
 #include <map>
 #include <mutex>
 #include <condition_variable>
+#include <sstream>
 
 
 struct Options
@@ -97,6 +98,39 @@ void Error(std::wstring message)
     
 }
 
+void CreatePath(std::wstring& root, std::wstring& relativePathToCreate)
+{
+    std::wstringstream pathStream(relativePathToCreate.c_str());
+    std::wstring folder;
+    std::vector<std::wstring> folders;
+
+    while (std::getline(pathStream, folder, L'\\'))
+    {
+        folders.push_back(folder);
+
+        _tprintf(TEXT("F %s \n"), folder.c_str());
+    }
+
+    std::wstring currentPath = root;
+    for (int i = 0; i < folders.size(); i++)
+    {
+        currentPath.append(L"\\").append(folders[i]);
+        CreateDirectory(currentPath.c_str(), NULL));
+    }
+}
+
+bool DoesDirectoryExist(std::wstring& pathToDirectory)
+{
+    DWORD fileType = GetFileAttributes(pathToDirectory.c_str());
+
+    if (fileType == INVALID_FILE_ATTRIBUTES)
+    {
+        return false;
+    }
+
+    return fileType & FILE_ATTRIBUTE_DIRECTORY;
+}
+
 enum Instruction : byte
 {
     COPY,
@@ -105,6 +139,11 @@ enum Instruction : byte
 
 int wmain(int argc, wchar_t* argv[])
 {
+    std::wstring pathToCreate = L"C:\\Projects\\Test\\AnotherTest\\Test2\\";
+    CreatePath(pathToCreate);
+    return 1;
+
+
     Options parsedOptions;
     parsedOptions.DryRun = false;
     ParseArguments(argc, argv, parsedOptions);
@@ -145,7 +184,6 @@ int wmain(int argc, wchar_t* argv[])
         {
             Instructions.enqueue(std::make_tuple(COPY, entry.first));
 
-
             _tprintf(TEXT("Different length for %s \n"), entry.first.c_str());
             continue;
         }
@@ -155,10 +193,22 @@ int wmain(int argc, wchar_t* argv[])
         // TODO: Check file signature..
     }
 
+    for (auto const& entry : destinationFiles)
+    {
+        // Remove any files in the destination that don't exist in the source
+        if (sourceFiles.count(entry.first) == 0)
+        {
+            Instructions.enqueue(std::make_tuple(REMOVE, entry.first));
+
+            _tprintf(TEXT("for %s \n"), entry.first.c_str());
+        }
+    }
+
     //parsedOptions.DestinationPath.erase(parsedOptions.DestinationPath.size() - 1, 1);
 
     std::wstring fullSourcePath, fullDestinationPath;
     bool result = false;
+    const size_t sourceRootPathLength = parsedOptions.SourcePath.size();
     while (Instructions.empty() == false)
     {
         const std::tuple<Instruction, std::wstring> instruction = Instructions.dequeue();
@@ -172,9 +222,22 @@ int wmain(int argc, wchar_t* argv[])
         case COPY:
 
             // Use CopyFileEx for progress
-            //if (parsedOptions.DryRun || CopyFile(sourcePath.c_str(), destinationPath.c_str(), false))
+            //if (parsedOptions.DryRun || CopyFile(sourcePath.c_str(), destinationFilePath.c_str(), false))
 
-            const std::wstring destinationPath = source[instruction._Get_rest()._Myfirst._Val].Path;
+            std::wstring destinationFilePath = sourcePath;// sourceFiles[instruction._Get_rest()._Myfirst._Val].Path;
+            destinationFilePath.erase(0, sourceRootPathLength);
+            destinationFilePath.insert(0, parsedOptions.DestinationPath);
+
+            std::wstring destinationPath = sourceFiles[instruction._Get_rest()._Myfirst._Val].Path;
+            destinationPath.erase(0, sourceRootPathLength);
+            std::wstring relativePath = destinationPath;
+            destinationPath.insert(0, parsedOptions.DestinationPath);
+
+            if (DoesDirectoryExist(destinationPath) == false)
+            {
+                CreatePath(parsedOptions.DestinationPath, relativePath);
+            }
+
             if (CopyFile(sourcePath.c_str(), destinationPath.c_str(), false))
             {
                 _tprintf(TEXT("[COPY] %s %s \n"), 
@@ -183,8 +246,9 @@ int wmain(int argc, wchar_t* argv[])
             }
             else
             {
-                _tprintf(TEXT("[ERROR] Could not copy %s %s \n"),
+                _tprintf(TEXT("[ERROR] Could not copy %s: %d %s\n"),
                     instruction._Get_rest()._Myfirst._Val.c_str(),
+                    GetLastError(),
                     parsedOptions.DryRun ? L"(dryrun)" : L"");
             }
             break;
