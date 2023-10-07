@@ -98,6 +98,8 @@ void Error(std::wstring message)
     
 }
 
+
+// TODO: Could be quicker?
 void CreatePath(std::wstring& root, std::wstring& relativePathToCreate)
 {
     std::wstringstream pathStream(relativePathToCreate.c_str());
@@ -107,15 +109,14 @@ void CreatePath(std::wstring& root, std::wstring& relativePathToCreate)
     while (std::getline(pathStream, folder, L'\\'))
     {
         folders.push_back(folder);
-
-        _tprintf(TEXT("F %s \n"), folder.c_str());
     }
 
     std::wstring currentPath = root;
     for (int i = 0; i < folders.size(); i++)
     {
         currentPath.append(L"\\").append(folders[i]);
-        CreateDirectory(currentPath.c_str(), NULL));
+
+        CreateDirectory(currentPath.c_str(), NULL);
     }
 }
 
@@ -134,16 +135,12 @@ bool DoesDirectoryExist(std::wstring& pathToDirectory)
 enum Instruction : byte
 {
     COPY,
+    REPLACE,
     REMOVE,
 };
 
 int wmain(int argc, wchar_t* argv[])
 {
-    std::wstring pathToCreate = L"C:\\Projects\\Test\\AnotherTest\\Test2\\";
-    CreatePath(pathToCreate);
-    return 1;
-
-
     Options parsedOptions;
     parsedOptions.DryRun = false;
     ParseArguments(argc, argv, parsedOptions);
@@ -182,7 +179,7 @@ int wmain(int argc, wchar_t* argv[])
         // Next check to see if the sizes match
         if (destinationFiles[entry.first].Size != entry.second.Size)
         {
-            Instructions.enqueue(std::make_tuple(COPY, entry.first));
+            Instructions.enqueue(std::make_tuple(REPLACE, entry.first));
 
             _tprintf(TEXT("Different length for %s \n"), entry.first.c_str());
             continue;
@@ -220,6 +217,7 @@ int wmain(int argc, wchar_t* argv[])
         switch (instruction._Myfirst._Val)
         {
         case COPY:
+        case REPLACE:
 
             // Use CopyFileEx for progress
             //if (parsedOptions.DryRun || CopyFile(sourcePath.c_str(), destinationFilePath.c_str(), false))
@@ -238,7 +236,7 @@ int wmain(int argc, wchar_t* argv[])
                 CreatePath(parsedOptions.DestinationPath, relativePath);
             }
 
-            if (CopyFile(sourcePath.c_str(), destinationPath.c_str(), false))
+            if (CopyFile(sourcePath.c_str(), destinationFilePath.c_str(), false))
             {
                 _tprintf(TEXT("[COPY] %s %s \n"), 
                     instruction._Get_rest()._Myfirst._Val.c_str(),
@@ -251,6 +249,10 @@ int wmain(int argc, wchar_t* argv[])
                     GetLastError(),
                     parsedOptions.DryRun ? L"(dryrun)" : L"");
             }
+
+            // Add - Green
+            // Replace - yellow
+            // Remove - red
             break;
         }
     }
