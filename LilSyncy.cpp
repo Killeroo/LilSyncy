@@ -161,8 +161,8 @@ int wmain(int argc, wchar_t* argv[])
     parsedOptions.DryRun = false;
     ParseArguments(argc, argv, parsedOptions);
 
-    if (parsedOptions.DestinationPath == L"" && parsedOptions.SourcePath == L"")
-        //|| parsedOptions.DestinationPath == parsedOptions.SourcePath)
+    if ((parsedOptions.DestinationPath == L"" || parsedOptions.SourcePath == L"")
+        || parsedOptions.DestinationPath == parsedOptions.SourcePath)
     {
         // TODO: Error message
         return 1;
