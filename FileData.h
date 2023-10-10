@@ -6,7 +6,9 @@
 struct FileData
 {
     std::wstring Name;
-    std::wstring Path;
+    std::wstring Path; // TODO: Remove this
     int64_t Size;
     FILETIME LastWriteTime;
+
+    bool Directory;
 };

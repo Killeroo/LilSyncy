@@ -99,9 +99,12 @@ void Error(std::wstring message)
 }
 
 
-// TODO: Could be quicker?
+// TODO: Could be quicker? Do file creation in reverse?
 void CreatePath(std::wstring& root, std::wstring& relativePathToCreate)
 {
+
+    _tprintf(TEXT("Create %s \n"), relativePathToCreate.c_str());
+
     std::wstringstream pathStream(relativePathToCreate.c_str());
     std::wstring folder;
     std::vector<std::wstring> folders;
@@ -116,7 +119,11 @@ void CreatePath(std::wstring& root, std::wstring& relativePathToCreate)
     {
         currentPath.append(L"\\").append(folders[i]);
 
-        CreateDirectory(currentPath.c_str(), NULL);
+        if (CreateDirectory(currentPath.c_str(), NULL) == false)
+        {
+            _tprintf(TEXT("Couldn't create %s \n"), currentPath.c_str());
+        }
+
     }
 }
 
@@ -138,6 +145,11 @@ enum Instruction : byte
     REPLACE,
     REMOVE,
 };
+
+bool StringLengthComparison(std::wstring left, std::wstring right)
+{
+    return left.size() > right.size();
+}
 
 int wmain(int argc, wchar_t* argv[])
 {
@@ -170,19 +182,26 @@ int wmain(int argc, wchar_t* argv[])
         // Copy it if so.
         if (destinationFiles.count(entry.first) == 0)
         {
-            Instructions.enqueue(std::make_tuple(COPY, entry.first));
+            if (entry.second.Directory == false)
+            {
+                Instructions.enqueue(std::make_tuple(COPY, entry.first));
 
-            _tprintf(TEXT("Missing %s file \n"), entry.first.c_str());
+                _tprintf(TEXT("Missing %s file \n"), entry.first.c_str());
+            }
+
             continue;
         }
 
         // Next check to see if the sizes match
         if (destinationFiles[entry.first].Size != entry.second.Size)
         {
-            Instructions.enqueue(std::make_tuple(REPLACE, entry.first));
+            if (entry.second.Directory == false)
+            {
+                Instructions.enqueue(std::make_tuple(REPLACE, entry.first));
 
-            _tprintf(TEXT("Different length for %s \n"), entry.first.c_str());
-            continue;
+                _tprintf(TEXT("Different length for %s \n"), entry.first.c_str());
+                continue;
+            }
         }
 
         // TODO: Check last write time..
@@ -190,16 +209,32 @@ int wmain(int argc, wchar_t* argv[])
         // TODO: Check file signature..
     }
 
+    // Save files and folders that we need to remove from the destination
+    // We store files in a seperate list because we want to remove them after we have deleted the files that
+    // were in them
+    std::vector<std::wstring> FoldersToDelete;
     for (auto const& entry : destinationFiles)
     {
         // Remove any files in the destination that don't exist in the source
         if (sourceFiles.count(entry.first) == 0)
         {
-            Instructions.enqueue(std::make_tuple(REMOVE, entry.first));
+            if (entry.second.Directory == false)
+            {
+                Instructions.enqueue(std::make_tuple(REMOVE, entry.first));
+                _tprintf(TEXT("Remove file %s \n"), entry.first.c_str());
+            }
+            else
+            {
+                FoldersToDelete.push_back(entry.second.Path);
+                _tprintf(TEXT("Remove folder %s \n"), entry.first.c_str());
+            }
 
-            _tprintf(TEXT("for %s \n"), entry.first.c_str());
         }
     }
+
+    // Sort the folders to delete biggest to smallest paths
+    // This ensures that we delete child directories before attempting to delete their parents
+    std::sort(FoldersToDelete.begin(), FoldersToDelete.end(), StringLengthComparison);
 
     //parsedOptions.DestinationPath.erase(parsedOptions.DestinationPath.size() - 1, 1);
 
@@ -212,19 +247,22 @@ int wmain(int argc, wchar_t* argv[])
 
         // We also don't need to do this for delete options but hey ho
         const std::wstring sourcePath = parsedOptions.SourcePath + instruction._Get_rest()._Myfirst._Val;
+        
+
+        std::wstring destinationFilePath = sourcePath;// sourceFiles[instruction._Get_rest()._Myfirst._Val].Path;
+        destinationFilePath.erase(0, sourceRootPathLength);
+        destinationFilePath.insert(0, parsedOptions.DestinationPath);
 
 
         switch (instruction._Myfirst._Val)
         {
         case COPY:
         case REPLACE:
+        {
 
             // Use CopyFileEx for progress
             //if (parsedOptions.DryRun || CopyFile(sourcePath.c_str(), destinationFilePath.c_str(), false))
 
-            std::wstring destinationFilePath = sourcePath;// sourceFiles[instruction._Get_rest()._Myfirst._Val].Path;
-            destinationFilePath.erase(0, sourceRootPathLength);
-            destinationFilePath.insert(0, parsedOptions.DestinationPath);
 
             std::wstring destinationPath = sourceFiles[instruction._Get_rest()._Myfirst._Val].Path;
             destinationPath.erase(0, sourceRootPathLength);
@@ -250,13 +288,48 @@ int wmain(int argc, wchar_t* argv[])
                     parsedOptions.DryRun ? L"(dryrun)" : L"");
             }
 
-            // Add - Green
-            // Replace - yellow
-            // Remove - red
             break;
         }
+
+        case REMOVE:
+        {
+
+
+            if (DeleteFile(destinationFilePath.c_str()))
+            {
+                _tprintf(TEXT("[REMOVE] %s %s \n"),
+                    instruction._Get_rest()._Myfirst._Val.c_str(),
+                    parsedOptions.DryRun ? L"(dryrun)" : L"");
+            }
+
+            break;
+        }
+        }
+
+        // Add - Green
+        // Replace - yellow
+        // Remove - red
     }
-    //CopyFile()
+    
+
+    // Clean up any directories
+    // Next go through and remove empty/removed folders from the destination
+    for (std::wstring currentFolder : FoldersToDelete)
+    {
+
+        if (RemoveDirectory(currentFolder.c_str()))
+        {
+            _tprintf(TEXT("[REMOVE FOLDER] %s %s \n"),
+                currentFolder.c_str(),
+                parsedOptions.DryRun ? L"(dryrun)" : L"");
+        }
+        else
+        {
+            _tprintf(TEXT("[REMOVE FOLDER] Error %s %d \n"),
+                currentFolder.c_str(),
+                GetLastError());
+        }
+    }
 
     return 0;
 }

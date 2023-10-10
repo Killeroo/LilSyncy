@@ -88,12 +88,23 @@ void FileWalker::WorkerThread(std::atomic<bool>& IsFinished)
         hFind = FindFirstFile((currentPath + L"*").c_str(), &FoundFileData);
         do
         {
+
+
             if (FoundFileData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
             {
                 currentFilename = FoundFileData.cFileName;
 
                 if (currentFilename != L"." && currentFilename != L"..")
                 {
+                    // TODO: Cleanup - D.R.Y
+                    FileData data;
+                    data.Name = FoundFileData.cFileName;
+                    data.Path = currentPath + FoundFileData.cFileName;
+                    data.LastWriteTime = FoundFileData.ftLastWriteTime;
+                    data.Size = (FoundFileData.nFileSizeHigh * MAXDWORD) + FoundFileData.nFileSizeLow;
+                    data.Directory = true;
+                    FoundFiles.enqueue(data);
+
                     PathsToProcess.enqueue(currentPath + FoundFileData.cFileName + L"\\");
                 }
             }
@@ -104,6 +115,7 @@ void FileWalker::WorkerThread(std::atomic<bool>& IsFinished)
                 data.Path = currentPath;
                 data.LastWriteTime = FoundFileData.ftLastWriteTime;
                 data.Size = (FoundFileData.nFileSizeHigh * MAXDWORD) + FoundFileData.nFileSizeLow;
+                data.Directory = false;
                 FoundFiles.enqueue(data);
             }
         } while (FindNextFile(hFind, &FoundFileData));
