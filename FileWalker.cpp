@@ -83,13 +83,14 @@ void FileWalker::WorkerThread(std::atomic<bool>& IsFinished)
     {
         currentPath = PathsToProcess.dequeue();
 
+        // TODO: There is a chance that threads are choking on too few things to process to start with
+        // turn on this logging and see them each adding multiple folders at once.
+        // Add some logging to see if they are going through the same files and make them focus on different things...
         //_tprintf(TEXT("%s\n"), currentPath.c_str());
 
         hFind = FindFirstFile((currentPath + L"*").c_str(), &FoundFileData);
         do
         {
-
-
             if (FoundFileData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
             {
                 currentFilename = FoundFileData.cFileName;
@@ -99,11 +100,14 @@ void FileWalker::WorkerThread(std::atomic<bool>& IsFinished)
                     // TODO: Cleanup - D.R.Y
                     FileData data;
                     data.Name = FoundFileData.cFileName;
-                    data.Path = currentPath + FoundFileData.cFileName;
+                    data.Path = currentPath;
                     data.LastWriteTime = FoundFileData.ftLastWriteTime;
                     data.Size = (FoundFileData.nFileSizeHigh * MAXDWORD) + FoundFileData.nFileSizeLow;
                     data.Directory = true;
                     FoundFiles.enqueue(data);
+
+
+                    //_tprintf(TEXT("-> %s %s\n"), currentPath.c_str(), currentFilename.c_str());
 
                     PathsToProcess.enqueue(currentPath + FoundFileData.cFileName + L"\\");
                 }
@@ -117,6 +121,9 @@ void FileWalker::WorkerThread(std::atomic<bool>& IsFinished)
                 data.Size = (FoundFileData.nFileSizeHigh * MAXDWORD) + FoundFileData.nFileSizeLow;
                 data.Directory = false;
                 FoundFiles.enqueue(data);
+                
+
+                //_tprintf(TEXT("*> %s\n"), currentPath.c_str());
             }
         } while (FindNextFile(hFind, &FoundFileData));
 

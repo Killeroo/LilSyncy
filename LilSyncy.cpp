@@ -146,9 +146,13 @@ enum Instruction : byte
     REMOVE,
 };
 
-bool StringLengthComparison(std::wstring left, std::wstring right)
+bool StringSortMethodDescendingSize(std::wstring left, std::wstring right)
 {
     return left.size() > right.size();
+}
+bool StringSortMethodAscendingSize(std::wstring left, std::wstring right)
+{
+    return left.size() < right.size();
 }
 
 int wmain(int argc, wchar_t* argv[])
@@ -176,6 +180,7 @@ int wmain(int argc, wchar_t* argv[])
     // Ok lets work out what files we need to sync
     // We loop through the sources files as they are our 'source of truth'
     SafeQueue<std::tuple<Instruction, std::wstring>> Instructions;
+    std::vector<std::wstring> FoldersToCreate;
     for (auto const& entry : sourceFiles)
     {
         // First check if the file is missing in the destination.
@@ -186,7 +191,14 @@ int wmain(int argc, wchar_t* argv[])
             {
                 Instructions.enqueue(std::make_tuple(COPY, entry.first));
 
-                _tprintf(TEXT("Missing %s file \n"), entry.first.c_str());
+                _tprintf(TEXT("Missing file %s \n"), entry.first.c_str());
+            }
+            else
+            {
+
+                FoldersToCreate.push_back(parsedOptions.DestinationPath + entry.first);
+
+                _tprintf(TEXT("Missing folder %s \n"), entry.first.c_str());
             }
 
             continue;
@@ -215,6 +227,7 @@ int wmain(int argc, wchar_t* argv[])
     std::vector<std::wstring> FoldersToDelete;
     for (auto const& entry : destinationFiles)
     {
+
         // Remove any files in the destination that don't exist in the source
         if (sourceFiles.count(entry.first) == 0)
         {
@@ -225,18 +238,42 @@ int wmain(int argc, wchar_t* argv[])
             }
             else
             {
-                FoldersToDelete.push_back(entry.second.Path);
-                _tprintf(TEXT("Remove folder %s \n"), entry.first.c_str());
+                std::wstring currentDir = entry.second.Path + entry.second.Name;
+                FoldersToDelete.push_back(currentDir);
+                _tprintf(TEXT("Remove folder %s \n"), currentDir.c_str());
             }
 
         }
     }
 
-    // Sort the folders to delete biggest to smallest paths
+    // Sort the folders lists descending then ascending
     // This ensures that we delete child directories before attempting to delete their parents
-    std::sort(FoldersToDelete.begin(), FoldersToDelete.end(), StringLengthComparison);
+    // and ensures that the files 
+    // =================================
+    // JUST WRITE A COMMENT HERE
+    // =================================
+    std::sort(FoldersToDelete.begin(), FoldersToDelete.end(), StringSortMethodDescendingSize);
+    std::sort(FoldersToCreate.begin(), FoldersToCreate.end(), StringSortMethodAscendingSize);
 
     //parsedOptions.DestinationPath.erase(parsedOptions.DestinationPath.size() - 1, 1);
+
+    // Create folders in destination first
+    for (std::wstring currentFolder : FoldersToCreate)
+    {
+
+        if (CreateDirectory(currentFolder.c_str(), NULL))
+        {
+            _tprintf(TEXT("[CREATE FOLDER] %s %s \n"),
+                currentFolder.c_str(),
+                parsedOptions.DryRun ? L"(dryrun)" : L"");
+        }
+        else
+        {
+            _tprintf(TEXT("[CREATE FOLDER] Error %s %d \n"),
+                currentFolder.c_str(),
+                GetLastError());
+        }
+    }
 
     std::wstring fullSourcePath, fullDestinationPath;
     bool result = false;
@@ -269,10 +306,11 @@ int wmain(int argc, wchar_t* argv[])
             std::wstring relativePath = destinationPath;
             destinationPath.insert(0, parsedOptions.DestinationPath);
 
-            if (DoesDirectoryExist(destinationPath) == false)
-            {
-                CreatePath(parsedOptions.DestinationPath, relativePath);
-            }
+            // Not required anymore
+            //if (DoesDirectoryExist(destinationPath) == false)
+            //{
+            //    CreatePath(parsedOptions.DestinationPath, relativePath);
+            //}
 
             if (CopyFile(sourcePath.c_str(), destinationFilePath.c_str(), false))
             {
