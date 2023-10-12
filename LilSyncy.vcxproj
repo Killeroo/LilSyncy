@@ -129,11 +129,13 @@
   <ItemGroup>
     <ClCompile Include="FileWalker.cpp" />
     <ClCompile Include="LilSyncy.cpp" />
+    <ClCompile Include="main.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Constants.h" />
     <ClInclude Include="FileData.h" />
     <ClInclude Include="FileWalker.h" />
+    <ClInclude Include="LilSyncy.h" />
     <ClInclude Include="SafeQueue.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

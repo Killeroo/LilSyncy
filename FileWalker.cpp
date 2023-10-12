@@ -1,4 +1,5 @@
 #include "FileWalker.h"
+#include "LilSyncy.h"
 #include <tchar.h>
 
 std::map<std::wstring, FileData> FileWalker::GetFiles(std::wstring path)

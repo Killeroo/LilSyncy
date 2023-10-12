@@ -1,6 +1,7 @@
 #pragma once
 
 #include "FileData.h"
+#include "LilSyncy.h"
 #include "SafeQueue.h"
 #include "Constants.h"
 

@@ -8,43 +8,52 @@
 #include <locale>
 #include <codecvt>
 #include <string>
-
-#include "FileWalker.h"
-
+#include <iostream>
+#include <format>
+#include <string_view>
 #include <map>
 #include <mutex>
 #include <condition_variable>
 #include <sstream>
 
+#include "FileWalker.h"
+#include "LilSyncy.h"
 
-struct Options
+
+
+
+int LilSyncy::Run(int argc, wchar_t* argv[])
 {
-    std::wstring SourcePath;
-    std::wstring DestinationPath;
+    ParseArguments(argc, argv);
 
-    bool DryRun;
-};
-
-bool IsValidFolder(const std::wstring& path)
-{
-    DWORD fileType = GetFileAttributes(path.c_str());
-
-    if (fileType == INVALID_FILE_ATTRIBUTES)
+    if ((Options.DestinationPath == L"" || Options.SourcePath == L"")
+        || Options.DestinationPath == Options.SourcePath)
     {
-        return false;
+        // TODO: Error message
+        LilSyncy::LogMessage(RED, TEXT("Could not find valid source and destination folders. Please check and try again."));
+        return 1;
     }
 
-    return fileType & FILE_ATTRIBUTE_DIRECTORY;
+    // Gather files
+    FileWalker walker;
+    std::map<std::wstring, FileData> sourceFiles = walker.GetFiles(Options.SourcePath);
+    std::map<std::wstring, FileData> destinationFiles = walker.GetFiles(Options.DestinationPath);
+
+    CalculateFolderDifferences(sourceFiles, destinationFiles);
+    PerformSync();
+
+    // TODO: Cleanup
+    //SyncInstructions
+    FoldersToCreate.clear();
+    FoldersToDelete.clear();
+
+    CloseHandle(ConsoleHandle);
+
+    return 0;
 }
 
-// https://stackoverflow.com/a/18597384
-std::wstring ToWideString(char*& string)
-{
-    std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
-    return converter.from_bytes(string);
-}
 
-void ParseArguments(int argc, wchar_t* argv[], Options& outOptions)
+void LilSyncy::ParseArguments(int argc, wchar_t* argv[])
 {
     for (int i = 0; i < argc; i++)
     {
@@ -57,7 +66,7 @@ void ParseArguments(int argc, wchar_t* argv[], Options& outOptions)
             // and check that it's a valid path
             if (nextArgument != L"")
             {
-                if (IsValidFolder(nextArgument))
+                if (DoesDirectoryExist(nextArgument))
                 {
                     // Sometimes we can get valid path without the closing slash
                     // (winapi won't like this so lets add it in ourselves)
@@ -66,7 +75,7 @@ void ParseArguments(int argc, wchar_t* argv[], Options& outOptions)
                         nextArgument.push_back('\\');
                     }
 
-                    outOptions.SourcePath = nextArgument;
+                    Options.SourcePath = nextArgument;
                 }
             }
         }
@@ -74,109 +83,26 @@ void ParseArguments(int argc, wchar_t* argv[], Options& outOptions)
         {
             if (nextArgument != L"")
             {
-                if (IsValidFolder(nextArgument))
+                if (DoesDirectoryExist(nextArgument))
                 {
                     if (nextArgument.back() != '\\')
                     {
                         nextArgument.push_back('\\');
                     }
 
-                    outOptions.DestinationPath = nextArgument;
+                    Options.DestinationPath = nextArgument;
                 }
             }
         }
         else if (argument == L"--dryrun")
         {
-            outOptions.DryRun = true;
+            Options.DryRun = true;
         }
     }
 }
 
-
-void Error(std::wstring message)
+void LilSyncy::CalculateFolderDifferences(std::map<std::wstring, FileData>& sourceFiles, std::map<std::wstring, FileData>& destinationFiles)
 {
-    
-}
-
-
-// TODO: Could be quicker? Do file creation in reverse?
-void CreatePath(std::wstring& root, std::wstring& relativePathToCreate)
-{
-
-    _tprintf(TEXT("Create %s \n"), relativePathToCreate.c_str());
-
-    std::wstringstream pathStream(relativePathToCreate.c_str());
-    std::wstring folder;
-    std::vector<std::wstring> folders;
-
-    while (std::getline(pathStream, folder, L'\\'))
-    {
-        folders.push_back(folder);
-    }
-
-    std::wstring currentPath = root;
-    for (int i = 0; i < folders.size(); i++)
-    {
-        currentPath.append(L"\\").append(folders[i]);
-
-        if (CreateDirectory(currentPath.c_str(), NULL) == false)
-        {
-            _tprintf(TEXT("Couldn't create %s \n"), currentPath.c_str());
-        }
-
-    }
-}
-
-bool DoesDirectoryExist(std::wstring& pathToDirectory)
-{
-    DWORD fileType = GetFileAttributes(pathToDirectory.c_str());
-
-    if (fileType == INVALID_FILE_ATTRIBUTES)
-    {
-        return false;
-    }
-
-    return fileType & FILE_ATTRIBUTE_DIRECTORY;
-}
-
-enum Instruction : byte
-{
-    COPY,
-    REPLACE,
-    REMOVE,
-};
-
-bool StringSortMethodDescendingSize(std::wstring left, std::wstring right)
-{
-    return left.size() > right.size();
-}
-bool StringSortMethodAscendingSize(std::wstring left, std::wstring right)
-{
-    return left.size() < right.size();
-}
-
-int wmain(int argc, wchar_t* argv[])
-{
-    Options parsedOptions;
-    parsedOptions.DryRun = false;
-    ParseArguments(argc, argv, parsedOptions);
-
-    if ((parsedOptions.DestinationPath == L"" || parsedOptions.SourcePath == L"")
-        || parsedOptions.DestinationPath == parsedOptions.SourcePath)
-    {
-        // TODO: Error message
-        return 1;
-    }
-
-    //const char* path = "C:\\*";
-    //LPCWSTR path = L"C:\\*";
-    //std::wstring path = TEXT("C:\\Projects\\");// TEXT("C:\\");
-
-    // Gather files
-    FileWalker walker;
-    std::map<std::wstring, FileData> sourceFiles = walker.GetFiles(parsedOptions.SourcePath);
-    std::map<std::wstring, FileData> destinationFiles = walker.GetFiles(parsedOptions.DestinationPath);
-
     // Ok lets work out what files we need to sync
     // We loop through the sources files as they are our 'source of truth'
     SafeQueue<std::tuple<Instruction, std::wstring>> Instructions;
@@ -190,15 +116,11 @@ int wmain(int argc, wchar_t* argv[])
             if (entry.second.Directory == false)
             {
                 Instructions.enqueue(std::make_tuple(COPY, entry.first));
-
-                _tprintf(TEXT("Missing file %s \n"), entry.first.c_str());
             }
             else
             {
 
-                FoldersToCreate.push_back(parsedOptions.DestinationPath + entry.first);
-
-                _tprintf(TEXT("Missing folder %s \n"), entry.first.c_str());
+                FoldersToCreate.push_back(Options.DestinationPath + entry.first);
             }
 
             continue;
@@ -210,8 +132,6 @@ int wmain(int argc, wchar_t* argv[])
             if (entry.second.Directory == false)
             {
                 Instructions.enqueue(std::make_tuple(REPLACE, entry.first));
-
-                _tprintf(TEXT("Different length for %s \n"), entry.first.c_str());
                 continue;
             }
         }
@@ -246,30 +166,27 @@ int wmain(int argc, wchar_t* argv[])
         }
     }
 
-    // Sort the folders lists descending then ascending
-    // This ensures that we delete child directories before attempting to delete their parents
-    // and ensures that the files 
-    // =================================
-    // JUST WRITE A COMMENT HERE
-    // =================================
-    std::sort(FoldersToDelete.begin(), FoldersToDelete.end(), StringSortMethodDescendingSize);
-    std::sort(FoldersToCreate.begin(), FoldersToCreate.end(), StringSortMethodAscendingSize);
+    // Sort the folders lists. We want to delete folders largest to smallest and create folders smallest to largest (based on path length),
+    // this is because windows complains if you try and add or delete a folder before it's been created/deleted
+    std::sort(FoldersToDelete.begin(), FoldersToDelete.end(), [](std::wstring left, std::wstring right) {return left.size() > right.size(); });
+    std::sort(FoldersToCreate.begin(), FoldersToCreate.end(), [](std::wstring left, std::wstring right) {return left.size() < right.size(); });
 
-    //parsedOptions.DestinationPath.erase(parsedOptions.DestinationPath.size() - 1, 1);
+}
 
+void LilSyncy::PerformSync()
+{
     // Create folders in destination first
     for (std::wstring currentFolder : FoldersToCreate)
     {
-
-        if (CreateDirectory(currentFolder.c_str(), NULL))
+        if (Options.DryRun || CreateDirectory(currentFolder.c_str(), NULL))
         {
-            _tprintf(TEXT("[CREATE FOLDER] %s %s \n"),
+            _tprintf(TEXT("[COPY] %s %s \n"),
                 currentFolder.c_str(),
                 parsedOptions.DryRun ? L"(dryrun)" : L"");
         }
         else
         {
-            _tprintf(TEXT("[CREATE FOLDER] Error %s %d \n"),
+            _tprintf(TEXT("[COPY] Error %s %d \n"),
                 currentFolder.c_str(),
                 GetLastError());
         }
@@ -277,97 +194,117 @@ int wmain(int argc, wchar_t* argv[])
 
     std::wstring fullSourcePath, fullDestinationPath;
     bool result = false;
-    const size_t sourceRootPathLength = parsedOptions.SourcePath.size();
+    const size_t sourceRootPathLength = Options.SourcePath.size();
+    std::wstring sourceFilePath, destinationFilePath;
     while (Instructions.empty() == false)
     {
         const std::tuple<Instruction, std::wstring> instruction = Instructions.dequeue();
 
-        // We also don't need to do this for delete options but hey ho
-        const std::wstring sourcePath = parsedOptions.SourcePath + instruction._Get_rest()._Myfirst._Val;
-        
-
-        std::wstring destinationFilePath = sourcePath;// sourceFiles[instruction._Get_rest()._Myfirst._Val].Path;
+        // Construct source and destination file paths using the relative paths
+        // (We don't need the source path for delete options but hey ho)
+        sourceFilePath = Options.SourcePath + instruction._Get_rest()._Myfirst._Val;
+        destinationFilePath = sourceFilePath;
         destinationFilePath.erase(0, sourceRootPathLength);
         destinationFilePath.insert(0, parsedOptions.DestinationPath);
-
 
         switch (instruction._Myfirst._Val)
         {
         case COPY:
         case REPLACE:
-        {
 
-            // Use CopyFileEx for progress
-            //if (parsedOptions.DryRun || CopyFile(sourcePath.c_str(), destinationFilePath.c_str(), false))
-
-
-            std::wstring destinationPath = sourceFiles[instruction._Get_rest()._Myfirst._Val].Path;
-            destinationPath.erase(0, sourceRootPathLength);
-            std::wstring relativePath = destinationPath;
-            destinationPath.insert(0, parsedOptions.DestinationPath);
-
-            // Not required anymore
-            //if (DoesDirectoryExist(destinationPath) == false)
-            //{
-            //    CreatePath(parsedOptions.DestinationPath, relativePath);
-            //}
-
-            if (CopyFile(sourcePath.c_str(), destinationFilePath.c_str(), false))
+            if (parsedOptions.DryRun || CopyFile(sourceFilePath.c_str(), destinationFilePath.c_str(), false))
             {
-                _tprintf(TEXT("[COPY] %s %s \n"), 
-                    instruction._Get_rest()._Myfirst._Val.c_str(),
-                    parsedOptions.DryRun ? L"(dryrun)" : L"");
+                if (instruction._Myfirst._Val == COPY)
+                {
+                    LilSyncy::LogMessage(GREEN, TEXT("[ADD] %s %s \n"),
+                        instruction._Get_rest()._Myfirst._Val.c_str(),
+                        parsedOptions.DryRun ? L"(dryrun)" : L"");
+                }
+                else
+                {
+                    LilSyncy::LogMessage(YELLOW, TEXT("[REPLACE] %s %s \n"),
+                        instruction._Get_rest()._Myfirst._Val.c_str(),
+                        parsedOptions.DryRun ? L"(dryrun)" : L"");
+                }
             }
             else
             {
-                _tprintf(TEXT("[ERROR] Could not copy %s: %d %s\n"),
+                LilSyncy::LogMessage(RED, TEXT("[ERROR] Could not copy %s: %d \n"),
                     instruction._Get_rest()._Myfirst._Val.c_str(),
-                    GetLastError(),
-                    parsedOptions.DryRun ? L"(dryrun)" : L"");
+                    GetLastError());
             }
 
             break;
-        }
 
         case REMOVE:
-        {
 
-
-            if (DeleteFile(destinationFilePath.c_str()))
+            if (parsedOptions.DryRun || DeleteFile(destinationFilePath.c_str()))
             {
-                _tprintf(TEXT("[REMOVE] %s %s \n"),
+                LilSyncy::LogMessage(RED, TEXT("[REMOVE] %s %s \n"),
                     instruction._Get_rest()._Myfirst._Val.c_str(),
                     parsedOptions.DryRun ? L"(dryrun)" : L"");
             }
 
             break;
         }
-        }
-
-        // Add - Green
-        // Replace - yellow
-        // Remove - red
     }
-    
 
     // Clean up any directories
     // Next go through and remove empty/removed folders from the destination
     for (std::wstring currentFolder : FoldersToDelete)
     {
-
-        if (RemoveDirectory(currentFolder.c_str()))
+        if (parsedOptions.DryRun || RemoveDirectory(currentFolder.c_str()))
         {
-            _tprintf(TEXT("[REMOVE FOLDER] %s %s \n"),
+            LilSyncy::LogMessage(RED, TEXT("[REMOVE] %s %s \n"),
                 currentFolder.c_str(),
                 parsedOptions.DryRun ? L"(dryrun)" : L"");
         }
         else
         {
-            _tprintf(TEXT("[REMOVE FOLDER] Error %s %d \n"),
+            LilSyncy::LogMessage(RED, TEXT("[REMOVE] Error %s %d \n"),
                 currentFolder.c_str(),
                 GetLastError());
         }
     }
+}
 
-    return 0;
+
+void LilSyncy::LogMessage(Colors color, const wchar_t* format, ...)
+{
+    // Get current console values if they haven't been set yet
+    if (ConsoleHandle == NULL)
+    {
+        ConsoleHandle = GetStdHandle(STD_OUTPUT_HANDLE);
+        if (GetConsoleScreenBufferInfo(ConsoleHandle, &ConsoleScreenBufferInfo))
+        {
+            CurrentConsoleColor = ConsoleScreenBufferInfo.wAttributes;
+        }
+        else
+        {
+            // Default colour if we couldn't get the current console buffer
+            CurrentConsoleColor = 8;
+        }
+    }
+
+    SetConsoleTextAttribute(ConsoleHandle, color);
+
+    va_list args;
+    va_start(args, format);
+    vfwprintf(stdout, format, args);
+    va_end(args);
+
+    // Reset the colour after
+    SetConsoleTextAttribute(ConsoleHandle, CurrentConsoleColor);
+}
+
+bool LilSyncy::DoesDirectoryExist(std::wstring& pathToDirectory)
+{
+    DWORD fileType = GetFileAttributes(pathToDirectory.c_str());
+
+    if (fileType == INVALID_FILE_ATTRIBUTES)
+    {
+        return false;
+    }
+
+    return fileType & FILE_ATTRIBUTE_DIRECTORY;
 }
