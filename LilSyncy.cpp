@@ -60,6 +60,12 @@ int LilSyncy::Run(int argc, wchar_t* argv[])
 
 void LilSyncy::ParseArguments(int argc, wchar_t* argv[])
 {
+    if (argc == 0)
+    {
+        printf("LilSyncy (v%.1f) \n%s", VERSION, USAGE_TEXT);
+        std::exit(0);
+    }
+
     for (int i = 0; i < argc; i++)
     {
         const std::wstring argument = argv[i];
@@ -226,6 +232,7 @@ void LilSyncy::PerformSync()
 
             if (Options.DryRun || CopyFile(sourceFilePath.c_str(), destinationFilePath.c_str(), false))
             {
+                // TODO: Would love to see file size here
                 if (instruction._Myfirst._Val == COPY)
                 {
                     LilSyncy::LogMessage(GREEN, TEXT("[ADD] %s %s\n"),
