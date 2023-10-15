@@ -60,7 +60,7 @@ int LilSyncy::Run(int argc, wchar_t* argv[])
 
 void LilSyncy::ParseArguments(int argc, wchar_t* argv[])
 {
-    if (argc == 0)
+    if (argc == 1)
     {
         printf("LilSyncy (v%.1f) \n%s", VERSION, USAGE_TEXT);
         std::exit(0);
