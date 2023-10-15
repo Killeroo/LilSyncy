@@ -1,24 +1,28 @@
 #pragma once
 
 #include <Windows.h>
+#include <vector>
+#include <map>
 #include <string>
+
+#include "SafeQueue.h"
 
 struct FileData
 {
-    std::wstring Name;
-    std::wstring Path; // TODO: Remove this
-    int64_t Size;
-    FILETIME LastWriteTime;
+    // TODO: With the relative path used as a key we probably don't need this so we could remove it at some point as it can take up a lot of memory for bigger scans
+    std::wstring Path;
 
-    bool Directory;
+    std::wstring Name;
+    int64_t Size = 0;
+    FILETIME LastWriteTime;
+    bool Directory = false;
 };
 
 struct SyncOptions
 {
     std::wstring SourcePath;
     std::wstring DestinationPath;
-
-    bool DryRun;
+    bool DryRun = false;
 };
 
 enum Instruction : byte
@@ -28,40 +32,38 @@ enum Instruction : byte
     REMOVE,
 };
 
-enum Colors : short
+enum Colors : WORD
 {
     GREEN = 2,
     RED = 4,
+    MAGENTA = 5,
     YELLOW = 6,
     WHITE = 7
 };
 
 class LilSyncy
 {
-
 public:
-    // TODO: Rename
     int Run(int argc, wchar_t* argv[]);
 
 private:
     void ParseArguments(int argc, wchar_t* argv[]);
     void CalculateFolderDifferences(std::map<std::wstring, FileData>& sourceFiles, std::map<std::wstring, FileData>& destinationFiles);
     void PerformSync();
-    void PrintHelp();
+    void Cleanup();
+
+    std::wstring GetLastErrorAsString();
 
 private:
     SyncOptions Options;
-    // TODO: Remove SafeQueue
-    SafeQueue<std::tuple<Instruction, std::wstring>> SyncInstructions;
-    std::vector<std::wstring>& FoldersToCreate;
-    std::vector<std::wstring>& FoldersToDelete;
+    std::queue<std::tuple<Instruction, std::wstring>> SyncInstructions;
+    std::vector<std::wstring> FoldersToCreate;
+    std::vector<std::wstring> FoldersToDelete;
+    unsigned long ItemsCopied = 0;
+    unsigned long ItemsDeleted = 0;
+    unsigned long Errors = 0;
 
 public:
     static void LogMessage(Colors color, const wchar_t* format, ...);
     static bool DoesDirectoryExist(std::wstring& pathToDirectory);
-
-private:
-    static HANDLE ConsoleHandle;
-    static CONSOLE_SCREEN_BUFFER_INFO ConsoleScreenBufferInfo;
-    static WORD CurrentConsoleColor;
 };

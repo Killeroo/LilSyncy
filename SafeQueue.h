@@ -12,63 +12,62 @@ class SafeQueue
 {
 public:
     SafeQueue(void)
-        : q()
-        , m()
-        , c()
+        : Queue()
+        , Mutex()
+        , Conditional()
     {}
 
     ~SafeQueue(void)
     {}
 
     // Add an element to the queue.
-    void enqueue(T t)
+    void Enqueue(T t)
     {
-        std::lock_guard<std::mutex> lock(m);
-        q.push(t);
-        c.notify_one();
+        std::lock_guard<std::mutex> lock(Mutex);
+        Queue.push(t);
+        Conditional.notify_one();
     }
 
     // Get the "front"-element.
-    // If the queue is empty, wait till a element is avaiable.
-    T dequeue(void)
+    // If the queue is Empty, wait till a element is avaiable.
+    T Dequeue(void)
     {
-        std::unique_lock<std::mutex> lock(m);
-        while (q.empty())
+        std::unique_lock<std::mutex> lock(Mutex);
+        while (Queue.empty())
         {
             // release lock as long as the wait and reaquire it afterwards.
-            c.wait(lock);
+            Conditional.wait(lock);
         }
-        T val = q.front();
-        q.pop();
+        T val = Queue.front();
+        Queue.pop();
         return val;
     }
 
-    bool empty()
+    bool Empty()
     {
-        // Is this needed???????, I don't think we need this lock 
-        std::lock_guard<std::mutex> lock(m);
-        return q.empty();
+        std::lock_guard<std::mutex> lock(Mutex);
+        return Queue.empty();
     }
 
-    int size()
+    size_t Size()
     {
-        std::lock_guard<std::mutex> lock(m);
-        return q.size();
+        std::lock_guard<std::mutex> lock(Mutex);
+        return Queue.size();
     }
 
-    std::queue<T> getQueue()
-    {
-        return q;
-    }
-
-    void clear()
+    void Clear()
     {
         std::queue<T> empty;
-        std::swap(q, empty);
+        std::swap(Queue, empty);
+    }
+
+    std::queue<T> GetQueue()
+    {
+        return Queue;
     }
 
 private:
-    std::queue<T> q;
-    mutable std::mutex m;
-    std::condition_variable c;
+    std::queue<T> Queue;
+    mutable std::mutex Mutex;
+    std::condition_variable Conditional;
 };
