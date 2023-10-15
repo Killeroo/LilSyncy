@@ -1,6 +1,8 @@
 # LilSyncy
 A simple and relative fast sync tool for windows. 
 
+![image](https://github.com/Killeroo/LilSyncy/assets/9999745/170d9f45-e349-405a-8392-b295832452ec)
+
 Copies folders and files from one folder to another, updating files that have changed and removing files that have been deleted.
 
 # Downloads
