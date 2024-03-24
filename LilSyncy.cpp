@@ -187,12 +187,12 @@ void LilSyncy::PerformSync()
     // hitting IO bottlenecks I would have probably set the thread count quite low so I left it single threaded for now.
 
     // Create folders in destination first
-    for (std::wstring currentFolder : FoldersToCreate)
+    for (std::wstring CurrentFolderPath : FoldersToCreate)
     {
-        if (Options.DryRun || CreateDirectory(currentFolder.c_str(), NULL))
+        if (Options.DryRun || CreateDirectory(CurrentFolderPath.c_str(), NULL))
         {
             LilSyncy::LogMessage(GREEN, TEXT("[COPY] %s %s\n"),
-                currentFolder.c_str(),
+                CurrentFolderPath.c_str(),
                 Options.DryRun ? L"(dryrun)" : L"");
 
             ItemsCopied++;
@@ -200,7 +200,7 @@ void LilSyncy::PerformSync()
         else
         {
             LilSyncy::LogMessage(RED, TEXT("[COPY] Could not add folder %s: %s [%d] \n"),
-                currentFolder.c_str(),
+                CurrentFolderPath.c_str(),
                 GetLastErrorAsString().c_str(),
                 GetLastError());
 
@@ -208,40 +208,47 @@ void LilSyncy::PerformSync()
         }
     }
 
-    std::wstring fullSourcePath, fullDestinationPath;
-    bool result = false;
-    const size_t sourceRootPathLength = Options.SourcePath.size();
-    std::wstring sourceFilePath, destinationFilePath;
+    const size_t SourceRootPathLength = Options.SourcePath.size();
+    std::wstring SourceFilePath, DestinationFilePath;
+    OperationCount = SyncInstructions.size();
     while (SyncInstructions.empty() == false)
     {
+        OperationsPerformed++;
+
         // Get next instruction
-        const std::tuple<Instruction, std::wstring> instruction = SyncInstructions.front();
+        const std::tuple<SyncInstruction, std::wstring> instruction = SyncInstructions.front();
         SyncInstructions.pop();
 
         // Construct source and destination file paths using the relative paths
         // (We don't need the source path for delete options but hey ho)
-        sourceFilePath = Options.SourcePath + instruction._Get_rest()._Myfirst._Val;
-        destinationFilePath = sourceFilePath;
-        destinationFilePath.erase(0, sourceRootPathLength);
-        destinationFilePath.insert(0, Options.DestinationPath);
+        SourceFilePath = Options.SourcePath + instruction._Get_rest()._Myfirst._Val;
+        DestinationFilePath = SourceFilePath;
+        DestinationFilePath.erase(0, SourceRootPathLength);
+        DestinationFilePath.insert(0, Options.DestinationPath);
 
         switch (instruction._Myfirst._Val)
         {
         case COPY:
         case REPLACE:
+            CurrentOperation.Filename = instruction._Get_rest()._Myfirst._Val;
+            CurrentOperation.Operation = instruction._Myfirst._Val;
 
-            if (Options.DryRun || CopyFile(sourceFilePath.c_str(), destinationFilePath.c_str(), false))
+            if (Options.DryRun || CopyFileEx(SourceFilePath.c_str(), DestinationFilePath.c_str(), &CopyFileProgress, this, FALSE, 0))
             {
                 // TODO: Would love to see file size here
                 if (instruction._Myfirst._Val == COPY)
                 {
-                    LilSyncy::LogMessage(GREEN, TEXT("[ADD] %s %s\n"),
+                    LilSyncy::LogMessage(GREEN, TEXT("[%lu/%lu] [ADD] %s %s\n"),
+                        OperationsPerformed,
+                        OperationCount,
                         instruction._Get_rest()._Myfirst._Val.c_str(),
                         Options.DryRun ? L"(dryrun)" : L"");
                 }
                 else
                 {
-                    LilSyncy::LogMessage(YELLOW, TEXT("[REPLACE] %s %s\n"),
+                    LilSyncy::LogMessage(YELLOW, TEXT("[%lu/%lu] [REPLACE] %s %s\n"),
+                        OperationsPerformed,
+                        OperationCount,
                         instruction._Get_rest()._Myfirst._Val.c_str(),
                         Options.DryRun ? L"(dryrun)" : L"");
                 }
@@ -250,10 +257,11 @@ void LilSyncy::PerformSync()
             }
             else
             {
-                LilSyncy::LogMessage(RED, TEXT("[ERROR] Could not copy %s: %s [%d] \n"),
+                LilSyncy::LogMessage(RED, TEXT("[%lu/%lu] [ERROR] Could not copy %s: %s \n"),
+                    OperationsPerformed,
+                    OperationCount,
                     instruction._Get_rest()._Myfirst._Val.c_str(),
-                    GetLastErrorAsString().c_str(),
-                    GetLastError());
+                    GetLastErrorAsString().c_str());
 
                 Errors++;
             }
@@ -262,9 +270,11 @@ void LilSyncy::PerformSync()
 
         case REMOVE:
 
-            if (Options.DryRun || DeleteFile(destinationFilePath.c_str()))
+            if (Options.DryRun || DeleteFile(DestinationFilePath.c_str()))
             {
-                LilSyncy::LogMessage(MAGENTA, TEXT("[REMOVE] %s %s \n"),
+                LilSyncy::LogMessage(MAGENTA, TEXT("[%lu/%lu] [REMOVE] %s %s \n"),
+                    OperationsPerformed,
+                    OperationCount,
                     instruction._Get_rest()._Myfirst._Val.c_str(),
                     Options.DryRun ? L"(dryrun)" : L"");
 
@@ -272,10 +282,11 @@ void LilSyncy::PerformSync()
             }
             else
             {
-                LilSyncy::LogMessage(RED, TEXT("[ERROR] Could not delete %s: %s [%d] \n"),
+                LilSyncy::LogMessage(RED, TEXT("[%lu/%lu] [ERROR] Could not delete %s: %s \n"),
+                    OperationsPerformed,
+                    OperationCount,
                     instruction._Get_rest()._Myfirst._Val.c_str(),
-                    GetLastErrorAsString().c_str(),
-                    GetLastError());
+                    GetLastErrorAsString().c_str());
 
                 Errors++;
             }
@@ -286,12 +297,12 @@ void LilSyncy::PerformSync()
 
     // Clean up any directories
     // Next go through and remove Empty/removed folders from the destination
-    for (std::wstring currentFolder : FoldersToDelete)
+    for (const std::wstring& CurrentFolderPath : FoldersToDelete)
     {
-        if (Options.DryRun || RemoveDirectory(currentFolder.c_str()))
+        if (Options.DryRun || RemoveDirectory(CurrentFolderPath.c_str()))
         {
             LilSyncy::LogMessage(MAGENTA, TEXT("[REMOVE] %s %s \n"),
-                currentFolder.c_str(),
+                CurrentFolderPath.c_str(),
                 Options.DryRun ? L"(dryrun)" : L"");
 
             ItemsDeleted++;
@@ -299,12 +310,30 @@ void LilSyncy::PerformSync()
         else
         {
             LilSyncy::LogMessage(RED, TEXT("[REMOVE] Error %s %s \n"),
-                currentFolder.c_str(),
+                CurrentFolderPath.c_str(),
                 GetLastErrorAsString().c_str());
 
             Errors++;
         }
     }
+}
+
+DWORD LilSyncy::CopyFileProgress(LARGE_INTEGER TotalFileBytes, LARGE_INTEGER TotalBytesTransferred, LARGE_INTEGER StreamSize, LARGE_INTEGER StreamSizeTransferred, DWORD dwStreamNumber, DWORD dwCallbackReason, HANDLE hSourceFile, HANDLE hDestinationFile, LPVOID lpData)
+{
+    const double PercentComplete = (static_cast<double>(TotalBytesTransferred.QuadPart) / static_cast<double>(TotalFileBytes.QuadPart)) * 100.0;
+
+    LilSyncy* Self = static_cast<LilSyncy*>(lpData);
+
+    FileOperation Operation = Self->GetCurrentOperation();
+
+    // TODO: Move into main class
+    LilSyncy::LogMessage(GREEN, TEXT("[%lu/%lu] [ADD] %s (%%%.0f)\r"),
+        Self->GetProcessedInstructions(),
+        Self->GetTotalInstructions(),
+        Operation.Filename.c_str(),
+        PercentComplete);
+
+    return PROGRESS_CONTINUE;
 }
 
 void LilSyncy::Cleanup()
@@ -319,7 +348,7 @@ void LilSyncy::Cleanup()
 
     FoldersToCreate.clear();
     FoldersToDelete.clear();
-    std::queue<std::tuple<Instruction, std::wstring>> empty;
+    std::queue<std::tuple<SyncInstruction, std::wstring>> empty;
     std::swap(SyncInstructions, empty);
 
     CloseHandle(ConsoleHandle);
@@ -328,28 +357,28 @@ void LilSyncy::Cleanup()
 // From: https://stackoverflow.com/a/17387176
 std::wstring LilSyncy::GetLastErrorAsString()
 {
-    DWORD errorId = GetLastError();
+    DWORD ErrorId = GetLastError();
     
-    // Check there actually is a valid error message
-    if (errorId == ERROR_SUCCESS)
+    // Check there actually is a valid error Message
+    if (ErrorId == ERROR_SUCCESS)
     {
         return std::wstring();
     }
 
-    // Ask winapi to give us the string version of that error message and put it in a buffer, which we then convert back to a string
-    LPWCH messageBuffer = NULL;
+    // Ask winapi to give us the string version of that error Message and put it in a buffer, which we then convert back to a string
+    LPWCH MessageBuffer = NULL;
     size_t size = FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
-        NULL, errorId, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), (LPWCH)&messageBuffer, 0, NULL);
-    std::wstring message(messageBuffer, size);
-    LocalFree(messageBuffer);
+        NULL, ErrorId, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), (LPWCH)&MessageBuffer, 0, NULL);
+    std::wstring Message(MessageBuffer, size);
+    LocalFree(MessageBuffer);
 
     // TODO: Could change this to save directly to a reference if performance becomes more of a factor
-    return message;
+    return Message;
 }
 
 static CONSOLE_SCREEN_BUFFER_INFO ConsoleScreenBufferInfo;
 static WORD CurrentConsoleColor;
-void LilSyncy::LogMessage(Colors color, const wchar_t* format, ...)
+void LilSyncy::LogMessage(ConsoleColors color, const wchar_t* format, ...)
 {
     // Get current console values if they haven't been set yet
     if (ConsoleHandle == NULL)
