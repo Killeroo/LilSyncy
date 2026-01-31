@@ -12,6 +12,8 @@ Usage: \n\
 [required] --destination      Path you want to sync to.\n\
 \n\
            --dryrun           Run sync without actually moving or deleting any files.\n\
+           --diff             Prints differences between source and destination paths (does not sync).\n\
+           --size             Progress for file copies is shown in size (bytes) instead of a percentage.\n\
            --help             Displays this help message.\n\
 \n\
 Written by Matthew Carney [matthewcarney64@gmail.com]\n\

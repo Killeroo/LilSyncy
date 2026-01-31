@@ -41,6 +41,8 @@ struct SyncOptions
     std::wstring SourcePath;
     std::wstring DestinationPath;
     bool DryRun = false;
+    bool Diff = false;
+    bool FileProgressAsSize = false;
 };
 
 // TODO: Include size
@@ -48,6 +50,12 @@ struct FileOperation
 {
     std::wstring Filename;
     SyncInstruction Operation;
+};
+
+struct StringUtils 
+{
+    static std::wstring BytesToString(const int64_t& Bytes);
+    static std::wstring PrettyPrintTime(const int64_t& Seconds);
 };
 
 class LilSyncy // TODO: Rename
@@ -58,10 +66,14 @@ public:
     const FileOperation GetCurrentOperation() { return CurrentOperation; }
     const size_t GetTotalInstructions() { return OperationCount; }
     const size_t GetProcessedInstructions() { return OperationsPerformed; }
+    const SyncOptions& GetOptions() const { return Options; }
+    const int64_t GetCopiedBytes() const { return BytesCopied; }
+    const int64_t GetTotlaBytes() const { return TotalBytes; }
 
 private:
     void ParseArguments(int argc, wchar_t* argv[]);
     void CalculateFolderDifferences(std::map<std::wstring, FileData>& sourceFiles, std::map<std::wstring, FileData>& destinationFiles);
+    void PrintDifferences(std::map<std::wstring, FileData>& sourceFiles, std::map<std::wstring, FileData>& destinationFiles);
     void PerformSync();
     void Cleanup();
 
@@ -89,6 +101,8 @@ private:
     unsigned long ItemsCopied = 0;
     unsigned long ItemsDeleted = 0;
     unsigned long Errors = 0;
+    int64_t BytesCopied = 0;
+    int64_t TotalBytes = 0;
 
     size_t OperationCount = 0;
     size_t OperationsPerformed = 0;
@@ -96,6 +110,11 @@ private:
     FileOperation CurrentOperation;
 
 public:
+    // Size of last file that was copied, public because I'm lazy
+    int64_t LastCopiedBytes = 0;
+
+public:
     static void LogMessage(ConsoleColors color, const wchar_t* format, ...);
     static bool DoesDirectoryExist(std::wstring& pathToDirectory);
+
 };

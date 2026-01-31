@@ -1,19 +1,19 @@
 // LilSyncy.cpp : This file contains the 'main' function. Program execution begins and ends there.
 //
 
-#include <iostream>
-#include <windows.h>
-#include <tchar.h>
-#include <queue>
-#include <locale>
+#include <algorithm>
+#include <chrono>
 #include <codecvt>
-#include <string>
+#include <condition_variable>
 #include <iostream>
+#include <locale>
 #include <map>
 #include <mutex>
-#include <condition_variable>
+#include <queue>
 #include <sstream>
-#include <chrono>
+#include <string>
+#include <tchar.h>
+#include <windows.h>
 
 #include "FileWalker.h"
 #include "LilSyncy.h"
@@ -39,16 +39,26 @@ int LilSyncy::Run(int argc, wchar_t* argv[])
     std::map<std::wstring, FileData> sourceFiles = walker.GetFiles(Options.SourcePath);
     std::map<std::wstring, FileData> destinationFiles = walker.GetFiles(Options.DestinationPath);
 
-    // Work out differences and sync the files
+    // This works out what operations (copy, delete etc) we need to perform to achieve parity between the 2 locations
     CalculateFolderDifferences(sourceFiles, destinationFiles);
+
+    if (Options.Diff)
+    {
+        // If we are just printing the differences then don't sync just exit.
+        PrintDifferences(sourceFiles, destinationFiles);
+        return 0;
+    }
+
+    // Copy the files!
     PerformSync();
 
     // Prints summary
     const std::chrono::steady_clock::time_point endTime = std::chrono::steady_clock::now();
     const long long ellapsedMilliseconds = std::chrono::duration_cast<std::chrono::seconds>(endTime - startTime).count();
-    _tprintf(TEXT("Sync complete in %lld seconds. %lu items synced (%lu copied, %lu removed) with %lu errors."),
-        ellapsedMilliseconds,
+    _tprintf(TEXT("Sync complete in %s seconds. %lu items synced (%s - %lu copied, %lu removed) with %lu errors."),
+        StringUtils::PrettyPrintTime(ellapsedMilliseconds).c_str(),
         ItemsCopied + ItemsDeleted,
+        StringUtils::BytesToString(BytesCopied).c_str(),
         ItemsCopied,
         ItemsDeleted,
         Errors);
@@ -105,6 +115,14 @@ void LilSyncy::ParseArguments(int argc, wchar_t* argv[])
                 }
             }
         }
+        else if (argument == L"--diff")
+        {
+            Options.Diff = true;
+        }
+        else if (argument == L"--size")
+        {
+            Options.FileProgressAsSize = true;
+        }
         else if (argument == L"--dryrun")
         {
             Options.DryRun = true;
@@ -129,6 +147,7 @@ void LilSyncy::CalculateFolderDifferences(std::map<std::wstring, FileData>& sour
         {
             if (entry.second.Directory == false)
             {
+                TotalBytes += entry.second.Size;
                 SyncInstructions.push(std::make_tuple(COPY, entry.first));
             }
             else
@@ -144,6 +163,7 @@ void LilSyncy::CalculateFolderDifferences(std::map<std::wstring, FileData>& sour
         {
             if (entry.second.Directory == false)
             {
+                TotalBytes += entry.second.Size;
                 SyncInstructions.push(std::make_tuple(REPLACE, entry.first));
                 continue;
             }
@@ -178,7 +198,77 @@ void LilSyncy::CalculateFolderDifferences(std::map<std::wstring, FileData>& sour
     // this is because windows complains if you try and add or delete a folder before it's been created/deleted
     std::sort(FoldersToDelete.begin(), FoldersToDelete.end(), [](std::wstring left, std::wstring right) {return left.size() > right.size(); });
     std::sort(FoldersToCreate.begin(), FoldersToCreate.end(), [](std::wstring left, std::wstring right) {return left.size() < right.size(); });
+}
 
+void LilSyncy::PrintDifferences(std::map<std::wstring, FileData>& sourceFiles, std::map<std::wstring, FileData>& destinationFiles)
+{
+    _tprintf(L"\n%s vs %s\n------------------------------\n",
+        Options.SourcePath.c_str(),
+        Options.DestinationPath.c_str());
+
+    auto calculateTotalSize = [](std::map<std::wstring, FileData>& files) 
+    {
+        int64_t totalSize = 0;
+        for (const std::pair<std::wstring, FileData>& file : files)
+        {
+            totalSize += file.second.Size;
+        }
+        return totalSize;
+    };
+
+    const int64_t sourceSize = calculateTotalSize(sourceFiles);
+    const int64_t destinationSize = calculateTotalSize(destinationFiles);
+    const int64_t bytesDiff = destinationSize - sourceSize;
+    _tprintf(L"%s vs %s: ",
+        StringUtils::BytesToString(sourceSize).c_str(),
+        StringUtils::BytesToString(destinationSize).c_str());
+    LilSyncy::LogMessage(bytesDiff != 0ULL ? RED : GREEN, TEXT("(%s difference)\n"),
+        StringUtils::BytesToString(llabs(bytesDiff)).c_str());
+
+
+    auto calcFolderAndFileCount = [](std::map<std::wstring, FileData>& files, int64_t& OutFilesNum, int64_t& OutDirNum)
+    {
+        OutFilesNum = 0, OutDirNum = 0;
+        for (const std::pair<std::wstring, FileData>& file : files)
+        {
+            if (file.second.Directory)
+            {
+                OutDirNum++;
+            }
+            else
+            {
+                OutFilesNum++;
+            }
+        }
+    };
+
+    int64_t srcFileNum = 0; int64_t srcDirNum = 0;
+    int64_t destFileNum = 0; int64_t destDirNum = 0;
+    calcFolderAndFileCount(sourceFiles, srcFileNum, srcDirNum);
+    calcFolderAndFileCount(destinationFiles, destFileNum, destDirNum);
+    const bool filesAndDirsMatch = srcFileNum == destFileNum && srcDirNum == destDirNum;
+    _tprintf(L"%lld files, %lld folders vs %lld files, %lld folders: ",
+        srcFileNum,
+        srcDirNum,
+        destFileNum,
+        destDirNum);
+    LilSyncy::LogMessage(filesAndDirsMatch ? GREEN : RED, TEXT("(%lld files, %lld folders different)\n"),
+        llabs(destFileNum - srcFileNum),
+        llabs(destDirNum- srcDirNum));
+
+
+    if (!filesAndDirsMatch || bytesDiff != 0)
+    {
+        _tprintf(L"\n%zu changes (%s) required to make '%s' the same as '%s'\n",
+            SyncInstructions.size(),
+            StringUtils::BytesToString(bytesDiff).c_str(),
+            Options.SourcePath.c_str(),
+            Options.DestinationPath.c_str());
+    }
+    else 
+    {
+        _tprintf(L"\nBoth paths match!\n");
+    }
 }
 
 void LilSyncy::PerformSync()
@@ -211,6 +301,7 @@ void LilSyncy::PerformSync()
     const size_t SourceRootPathLength = Options.SourcePath.size();
     std::wstring SourceFilePath, DestinationFilePath;
     OperationCount = SyncInstructions.size();
+    BytesCopied = 0;
     while (SyncInstructions.empty() == false)
     {
         OperationsPerformed++;
@@ -238,28 +329,35 @@ void LilSyncy::PerformSync()
                 // TODO: Would love to see file size here
                 if (instruction._Myfirst._Val == COPY)
                 {
-                    LilSyncy::LogMessage(GREEN, TEXT("[%lu/%lu] [ADD] %s %s\n"),
+                    LilSyncy::LogMessage(GREEN, TEXT("[%lu/%lu] [%s/%s] [ADD] %s %s\n"),
                         OperationsPerformed,
                         OperationCount,
+                        StringUtils::BytesToString(BytesCopied).c_str(),
+                        StringUtils::BytesToString(TotalBytes).c_str(),
                         instruction._Get_rest()._Myfirst._Val.c_str(),
                         Options.DryRun ? L"(dryrun)" : L"");
                 }
                 else
                 {
-                    LilSyncy::LogMessage(YELLOW, TEXT("[%lu/%lu] [REPLACE] %s %s\n"),
+                    LilSyncy::LogMessage(YELLOW, TEXT("[%lu/%lu] [%s/%s] [ [REPLACE] %s %s\n"),
                         OperationsPerformed,
                         OperationCount,
+                        StringUtils::BytesToString(BytesCopied).c_str(),
+                        StringUtils::BytesToString(TotalBytes).c_str(),
                         instruction._Get_rest()._Myfirst._Val.c_str(),
                         Options.DryRun ? L"(dryrun)" : L"");
                 }
 
                 ItemsCopied++;
+                BytesCopied += LastCopiedBytes;
             }
             else
             {
-                LilSyncy::LogMessage(RED, TEXT("[%lu/%lu] [ERROR] Could not copy %s: %s \n"),
+                LilSyncy::LogMessage(RED, TEXT("[%lu/%lu] [%s/%s] [ERROR] Could not copy %s: %s \n"),
                     OperationsPerformed,
                     OperationCount,
+                    StringUtils::BytesToString(BytesCopied).c_str(),
+                    StringUtils::BytesToString(TotalBytes).c_str(),
                     instruction._Get_rest()._Myfirst._Val.c_str(),
                     GetLastErrorAsString().c_str());
 
@@ -272,9 +370,11 @@ void LilSyncy::PerformSync()
 
             if (Options.DryRun || DeleteFile(DestinationFilePath.c_str()))
             {
-                LilSyncy::LogMessage(MAGENTA, TEXT("[%lu/%lu] [REMOVE] %s %s \n"),
+                LilSyncy::LogMessage(MAGENTA, TEXT("[%lu/%lu] [%s/%s] [REMOVE] %s %s \n"),
                     OperationsPerformed,
                     OperationCount,
+                    StringUtils::BytesToString(BytesCopied).c_str(),
+                    StringUtils::BytesToString(TotalBytes).c_str(),
                     instruction._Get_rest()._Myfirst._Val.c_str(),
                     Options.DryRun ? L"(dryrun)" : L"");
 
@@ -282,9 +382,11 @@ void LilSyncy::PerformSync()
             }
             else
             {
-                LilSyncy::LogMessage(RED, TEXT("[%lu/%lu] [ERROR] Could not delete %s: %s \n"),
+                LilSyncy::LogMessage(RED, TEXT("[%lu/%lu] [%s/%s] [ERROR] Could not delete %s: %s \n"),
                     OperationsPerformed,
                     OperationCount,
+                    StringUtils::BytesToString(BytesCopied).c_str(),
+                    StringUtils::BytesToString(TotalBytes).c_str(),
                     instruction._Get_rest()._Myfirst._Val.c_str(),
                     GetLastErrorAsString().c_str());
 
@@ -320,18 +422,32 @@ void LilSyncy::PerformSync()
 
 DWORD LilSyncy::CopyFileProgress(LARGE_INTEGER TotalFileBytes, LARGE_INTEGER TotalBytesTransferred, LARGE_INTEGER StreamSize, LARGE_INTEGER StreamSizeTransferred, DWORD dwStreamNumber, DWORD dwCallbackReason, HANDLE hSourceFile, HANDLE hDestinationFile, LPVOID lpData)
 {
-    const double PercentComplete = (static_cast<double>(TotalBytesTransferred.QuadPart) / static_cast<double>(TotalFileBytes.QuadPart)) * 100.0;
+    if (LilSyncy* Self = static_cast<LilSyncy*>(lpData))
+    {
+        FileOperation Operation = Self->GetCurrentOperation();
 
-    LilSyncy* Self = static_cast<LilSyncy*>(lpData);
+        // TODO: Move into main class
+        LilSyncy::LogMessage(GREEN, TEXT("[%lu/%lu] [%s/%s] [ADD] %s"),
+            Self->GetProcessedInstructions(),
+            Self->GetTotalInstructions(),
+            StringUtils::BytesToString(Self->BytesCopied).c_str(),
+            StringUtils::BytesToString(Self->TotalBytes).c_str(),
+            Operation.Filename.c_str());
 
-    FileOperation Operation = Self->GetCurrentOperation();
+        if (Self->GetOptions().FileProgressAsSize)
+        {
+            LilSyncy::LogMessage(GREEN, TEXT(" (%s/%s)\r"), 
+                StringUtils::BytesToString(static_cast<int64_t>(TotalBytesTransferred.QuadPart)),
+                StringUtils::BytesToString(static_cast<int64_t>(TotalFileBytes.QuadPart)));
+        }
+        else
+        {
+            const double PercentComplete = (static_cast<double>(TotalBytesTransferred.QuadPart) / static_cast<double>(TotalFileBytes.QuadPart)) * 100.0;
+            LilSyncy::LogMessage(GREEN, TEXT(" (%%%.0f)\r"), PercentComplete);
+        }
 
-    // TODO: Move into main class
-    LilSyncy::LogMessage(GREEN, TEXT("[%lu/%lu] [ADD] %s (%%%.0f)\r"),
-        Self->GetProcessedInstructions(),
-        Self->GetTotalInstructions(),
-        Operation.Filename.c_str(),
-        PercentComplete);
+        Self->LastCopiedBytes = TotalFileBytes.QuadPart;
+    }
 
     return PROGRESS_CONTINUE;
 }
@@ -416,4 +532,49 @@ bool LilSyncy::DoesDirectoryExist(std::wstring& pathToDirectory)
     }
 
     return fileType & FILE_ATTRIBUTE_DIRECTORY;
+}
+
+std::wstring StringUtils::BytesToString(const int64_t& Bytes)
+{
+    wchar_t buffer[128];
+    if (Bytes < 1024ULL) // Less than 1KB
+    {
+        swprintf(buffer, 128, L"%lldBytes", Bytes);
+    }
+    else if (Bytes < 1048576ULL) // Less than 1MB
+    {
+        swprintf(buffer, 128, L"%lldKB", Bytes / 1024ULL);
+    }
+    else if (Bytes < 1073741824ULL) // Less than 1GB
+    {
+        swprintf(buffer, 128, L"%lldMB", Bytes / 1024ULL / 1024ULL);
+    }
+    else
+    {
+        swprintf(buffer, 128, L"%.1fGB", (double) Bytes / 1024.0 / 1024.0 / 1024.0);
+    }
+
+    return std::wstring(buffer);
+}
+
+std::wstring StringUtils::PrettyPrintTime(const int64_t& Seconds)
+{
+    wchar_t buffer[128];
+    if (Seconds < 60)
+    {
+        swprintf(buffer, 128, L"%lld Seconds", Seconds);
+    } 
+    else if (Seconds < 3600)
+    {
+        const int64_t minutes = Seconds / 60ULL;
+        swprintf(buffer, 128, L"%lld Minute%s %lld Seconds", minutes, minutes > 1ULL ? L"s" : L"", Seconds);
+    }
+    else
+    {
+        const int64_t minutes = Seconds / 60ULL;
+        const int64_t hours = Seconds / 3600ULL;
+        swprintf(buffer, 128, L"%lld Hour%s %lld Minute%s %lld Seconds", hours, hours > 1ULL ? L"s" : L"", minutes, minutes > 1ULL ? L"s" : L"", Seconds);
+    }
+
+    return std::wstring(buffer);
 }
